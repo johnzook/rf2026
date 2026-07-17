@@ -146,14 +146,16 @@ const FOLLOWING = [
 
 // Per-venue delay in minutes (ring running behind). Edit on a weather day,
 // commit, redeploy — the page picks it up on the next poll after deploy.
+// Fri Jul 17: XC ~1h45; SJ ~1h30; FEI dressage (R1) 1h; HT dressage (R2/R3) 1h30.
+// SJR1/SJR3 run Sunday — leave 0 so Sunday times aren't shifted by today's delays.
 const DELAYS = {
-  XC: 0,
+  XC: 105,
   SJR1: 0,
   SJR3: 0,
-  SJR4: 0,
-  R1: 0,
-  R2: 0,
-  R3: 0,
+  SJR4: 90,
+  R1: 60,
+  R2: 90,
+  R3: 90,
   R4: 0,
   R5: 0,
   "Phase A": 0,
