@@ -153,9 +153,9 @@ const FOLLOWING = [
 // with the numbers below.
 const DELAY_DATE = "2026-07-17";
 
-// Fri Jul 17: XC ~1h45; SJ ~1h30; FEI dressage (R1) 1h; HT dressage (R2/R3) 1h30.
+// Fri Jul 17: SJ ~1h30; FEI dressage (R1) 1h; HT dressage (R2/R3) 1h30.
 const DELAYS = {
-  XC: 105,
+  XC: 0, // Friday XC was fully re-ordered — revised times live in OVERRIDES below
   SJR1: 0,
   SJR3: 0,
   SJR4: 90,
@@ -166,6 +166,17 @@ const DELAYS = {
   R5: 0,
   "Phase A": 0,
 };
+
+// Exact revised times from official order-of-go sheets, when a ring is
+// re-ordered rather than uniformly delayed. An override replaces the feed's
+// scheduled time for that horse+phase (venue delays are NOT added on top).
+// Remove entries once the feed catches up or the day is over.
+const OVERRIDES = [
+  // Friday XC revised order of go (xcfriREVISED.pdf):
+  { pinny: 245, phase: "Cross Country", date: "2026-07-17", time: "4:40 PM" }, // Aulita / Ellie
+  { pinny: 192, phase: "Cross Country", date: "2026-07-17", time: "5:42 PM" }, // Crocker / Sportsfield Harley Davis
+  { pinny: 270, phase: "Cross Country", date: "2026-07-17", time: "6:16 PM" }, // Grandia / Captain Alfred
+];
 
 /* ======================================================================== */
 
@@ -205,6 +216,17 @@ function eventLocalNow() {
   return new Date(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
 }
 
+// Overrides indexed by pinny+phase, parsed to comparable wall-clock Dates.
+const OVERRIDE_IDX = {};
+for (const o of OVERRIDES) {
+  const [y, mo, d] = o.date.split("-").map(Number);
+  const t = /^(\d+):(\d+)\s*(AM|PM)$/i.exec(o.time.trim());
+  if (!t) continue;
+  let h = +t[1] % 12;
+  if (t[3].toUpperCase() === "PM") h += 12;
+  OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = new Date(y, mo - 1, d, h, +t[2], 0);
+}
+
 // Flatten EntryList[].RidingDetails[] into ride rows for followed riders.
 // NOTE: Venues[].date/time are a publish timestamp, not the ride time —
 // the schedule lives only in the RideTimes string.
@@ -217,9 +239,11 @@ function extractRides(feed) {
     for (const rd of e.RidingDetails || []) {
       const when = parseRideTime(rd.RideTimes); // empty = not yet scheduled
       if (!when) continue;
+      const override = OVERRIDE_IDX[`${e.PinnyNumber}|${rd.Phase}`] || null;
       rides.push({
         when,
-        dayKey: isoDay(when),
+        override,
+        dayKey: isoDay(override || when), // an override can move a ride's day
         phase: rd.Phase,
         venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
         rider: e.RiderName,
@@ -272,8 +296,11 @@ function esc(s) {
 }
 
 function adjustedTime(ride) {
+  if (ride.override) {
+    return { adj: ride.override, delayMin: 0, revised: +ride.override !== +ride.when };
+  }
   const mins = ride.dayKey === DELAY_DATE ? DELAYS[ride.venue] || 0 : 0;
-  return { adj: new Date(ride.when.getTime() + mins * 60_000), delayMin: mins };
+  return { adj: new Date(ride.when.getTime() + mins * 60_000), delayMin: mins, revised: false };
 }
 
 // Result cell: "--" / "" from the feed means not yet posted.
@@ -305,7 +332,9 @@ function popoverHTML(ride, adj, delayMin) {
     resultsRows = `<tr><td class="results-head" colspan="2">Results</td></tr>
       <tr><td colspan="2" class="pending">Not posted yet</td></tr>`;
   }
-  const timeRow = delayMin
+  const timeRow = ride.revised
+    ? `${fmtClock(adj)} <span style="color:var(--delay)">(revised; sched ${fmtClock(ride.when)})</span>`
+    : delayMin
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(sched ${fmtClock(ride.when)}, +${delayMin} min ${ride.venue})</span>`
     : fmtClock(ride.when);
   return `
@@ -379,7 +408,7 @@ function render() {
         ${isNext ? `<div class="next-tag">Next up</div>` : ""}
         <div class="time">
           <div class="adj">${fmtClock(r.adj)}</div>
-          ${r.delayMin ? `<div class="orig">${fmtClock(r.when)}</div>` : ""}
+          ${r.delayMin || r.revised ? `<div class="orig">${fmtClock(r.when)}</div>` : ""}
         </div>
         <div class="who">
           <div class="rider">${esc(r.rider)}</div>
