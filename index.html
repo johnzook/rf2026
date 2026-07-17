@@ -685,13 +685,12 @@ async function checkForNewDeploy() {
 // ---- "My riders" picker sheet ----
 
 function renderRiderSheet() {
-  const baked = new Set(FOLLOWING);
   const current = effectiveFollowing();
   document.getElementById("my-riders-list").innerHTML = (current.length
-    ? current.map(n => `<div class="rrow"><span>${esc(n)}${baked.has(n) ? `<small> · shared</small>` : ""}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
+    ? current.map(n => `<div class="rrow"><span>${esc(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
     : `<div class="sheet-sub">Not following anyone — search below to add.</div>`)
     + (getHiddenRiders().length
-    ? `<div class="sheet-sub">Removed from the shared list: ${esc(getHiddenRiders().join("; "))} · <button class="linklike" id="restore-shared">restore</button></div>`
+    ? `<div class="sheet-sub">Removed: ${esc(getHiddenRiders().join("; "))} · <button class="linklike" id="restore-shared">restore</button></div>`
     : "");
   const q = document.getElementById("rider-search").value.trim().toLowerCase();
   const resEl = document.getElementById("rider-results");
