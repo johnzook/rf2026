@@ -301,14 +301,22 @@ for (const o of ESTIMATES) {
   if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
 }
 
-// Personal additions to the follow list, stored in this browser only.
-// Empty for everyone by default, so the shared page is unaffected.
+// Per-browser edits to the follow list. FOLLOWING is just the pre-populated
+// default: additions and removals are both stored locally, so each phone
+// can shape its own list while shared-list updates still flow through.
 const MY_RIDERS_KEY = "rf2026:myRiders";
-function getMyRiders() {
-  try { return JSON.parse(localStorage.getItem(MY_RIDERS_KEY)) || []; } catch (e) { return []; }
+const HIDDEN_RIDERS_KEY = "rf2026:hiddenRiders";
+function getStoredList(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || []; } catch (e) { return []; }
 }
-function setMyRiders(list) {
-  try { localStorage.setItem(MY_RIDERS_KEY, JSON.stringify(list)); } catch (e) { /* blocked */ }
+function setStoredList(key, list) {
+  try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) { /* blocked */ }
+}
+const getMyRiders = () => getStoredList(MY_RIDERS_KEY);
+const getHiddenRiders = () => getStoredList(HIDDEN_RIDERS_KEY);
+function effectiveFollowing() {
+  const hidden = new Set(getHiddenRiders());
+  return [...FOLLOWING.filter(n => !hidden.has(n)), ...getMyRiders()];
 }
 
 // All accepted riders in the feed, for the "my riders" search picker.
@@ -328,7 +336,7 @@ function buildRiderIndex(feed) {
 // NOTE: Venues[].date/time are a publish timestamp, not the ride time —
 // the schedule lives only in the RideTimes string.
 function extractRides(feed) {
-  const following = new Set([...FOLLOWING, ...getMyRiders()]);
+  const following = new Set(effectiveFollowing());
   followedCount = following.size;
   const rides = [];
   for (const e of feed.EntryList || []) {
@@ -677,19 +685,23 @@ async function checkForNewDeploy() {
 // ---- "My riders" picker sheet ----
 
 function renderRiderSheet() {
-  const mine = getMyRiders();
-  document.getElementById("my-riders-list").innerHTML = mine.length
-    ? mine.map(n => `<div class="rrow"><span>${esc(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
-    : `<div class="sheet-sub">No riders added yet — search below.</div>`;
+  const baked = new Set(FOLLOWING);
+  const current = effectiveFollowing();
+  document.getElementById("my-riders-list").innerHTML = (current.length
+    ? current.map(n => `<div class="rrow"><span>${esc(n)}${baked.has(n) ? `<small> · shared</small>` : ""}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
+    : `<div class="sheet-sub">Not following anyone — search below to add.</div>`)
+    + (getHiddenRiders().length
+    ? `<div class="sheet-sub">Removed from the shared list: ${esc(getHiddenRiders().join("; "))} · <button class="linklike" id="restore-shared">restore</button></div>`
+    : "");
   const q = document.getElementById("rider-search").value.trim().toLowerCase();
   const resEl = document.getElementById("rider-results");
   if (q.length < 2) { resEl.innerHTML = ""; return; }
-  const baked = new Set(FOLLOWING), mineSet = new Set(mine);
+  const followedNow = new Set(current);
   const hits = allRiders.filter(r => r.name.toLowerCase().includes(q)).slice(0, 20);
   resEl.innerHTML = hits.length
     ? hits.map(r => {
-        const action = baked.has(r.name) ? `<span class="rtag">on shared list</span>`
-          : mineSet.has(r.name) ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
+        const action = followedNow.has(r.name)
+          ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
           : `<button class="rbtn add" data-n="${esc(r.name)}">Add</button>`;
         return `<div class="rrow"><span>${esc(r.name)}<small> · ${esc(r.horses.join(", "))}</small></span>${action}</div>`;
       }).join("")
@@ -705,11 +717,23 @@ document.getElementById("sheet-close").addEventListener("click", () => {
 });
 document.getElementById("rider-sheet").addEventListener("click", ev => {
   if (ev.target.id === "rider-sheet") { ev.currentTarget.hidden = true; return; } // backdrop tap
-  const btn = ev.target.closest(".rbtn");
-  if (!btn) return;
-  const name = btn.dataset.n;
-  const mine = getMyRiders();
-  setMyRiders(btn.classList.contains("add") ? [...mine, name] : mine.filter(n => n !== name));
+  if (ev.target.id === "restore-shared") {
+    setStoredList(HIDDEN_RIDERS_KEY, []);
+  } else {
+    const btn = ev.target.closest(".rbtn");
+    if (!btn) return;
+    const name = btn.dataset.n;
+    const mine = getMyRiders(), hidden = getHiddenRiders();
+    if (btn.classList.contains("add")) {
+      // Re-adding a hidden shared rider un-hides it; otherwise it's a personal add.
+      if (hidden.includes(name)) setStoredList(HIDDEN_RIDERS_KEY, hidden.filter(n => n !== name));
+      else if (!mine.includes(name)) setStoredList(MY_RIDERS_KEY, [...mine, name]);
+    } else {
+      // Removing: personal adds are deleted; shared riders are hidden locally.
+      if (mine.includes(name)) setStoredList(MY_RIDERS_KEY, mine.filter(n => n !== name));
+      else if (!hidden.includes(name)) setStoredList(HIDDEN_RIDERS_KEY, [...hidden, name]);
+    }
+  }
   if (lastFeed) rides = extractRides(lastFeed);
   renderRiderSheet();
   render();
