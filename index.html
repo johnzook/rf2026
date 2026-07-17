@@ -546,6 +546,7 @@ function render() {
       + PAST_GRACE_MIN * 60_000;
     const past = isToday && now.getTime() > activeUntil;
     const isNext = isToday && !past && !nextUpFound && (nextUpFound = true);
+    const nextTag = minsUntil <= 0 ? "Now" : "Next up";
     const soon = isToday && !past && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
     if (isToday) {
@@ -557,7 +558,7 @@ function render() {
     if (r.extra) {
       return `
         <div class="row extra${isNext ? " next-up" : ""}${past ? " past" : ""}">
-          ${isNext ? `<div class="next-tag">Next up</div>` : ""}
+          ${isNext ? `<div class="next-tag">${nextTag}</div>` : ""}
           <div class="time"><div class="adj">${fmtClock(r.adj)}</div></div>
           <div class="who" style="grid-column: 2 / -1">
             <div class="rider">${esc(r.title)}</div>
@@ -568,7 +569,7 @@ function render() {
     }
     return `
       <div class="row${isNext ? " next-up" : ""}${past ? " past" : ""}${soon ? " soon" : ""}" data-i="${i}">
-        ${isNext ? `<div class="next-tag">Next up</div>` : ""}
+        ${isNext ? `<div class="next-tag">${nextTag}</div>` : ""}
         <div class="time">
           <div class="adj">${fmtClock(r.adj)}</div>
           ${r.delayMin || r.revised ? `<div class="orig">${fmtClock(r.when)}</div>` : ""}
