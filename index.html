@@ -71,6 +71,7 @@
   .time .orig { font-size: 11px; color: var(--delay); text-decoration: line-through; font-variant-numeric: tabular-nums; }
   .who .rider { font-weight: 650; font-size: 15px; }
   .who .horse { font-size: 13px; color: var(--muted); }
+  .who .horse b { font-weight: 650; color: var(--ink); }
   .meta { text-align: right; }
   .meta .phase { font-size: 13px; font-weight: 600; }
   .meta .venue { font-size: 12px; color: var(--muted); }
@@ -576,7 +577,7 @@ function render() {
         </div>
         <div class="who">
           <div class="rider">${esc(r.rider)}</div>
-          <div class="horse">${esc(r.horse)}</div>
+          <div class="horse">${esc(r.horse)}${r.pinny != null ? ` · <b>#${esc(r.pinny)}</b>` : ""}</div>
         </div>
         <div class="meta">
           <div class="phase">${esc(r.phase)}</div>
