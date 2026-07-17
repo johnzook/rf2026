@@ -66,6 +66,8 @@
   }
   .row.next-up { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
   .row.past { opacity: .55; }
+  .row.past.pinned { opacity: 1; }
+  @media (hover: hover) { .row.past:hover { opacity: 1; } }
   .time { text-align: right; }
   .time .adj { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .time .orig { font-size: 11px; color: var(--delay); text-decoration: line-through; font-variant-numeric: tabular-nums; }
