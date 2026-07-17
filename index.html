@@ -75,6 +75,8 @@
   .meta .phase { font-size: 13px; font-weight: 600; }
   .meta .venue { font-size: 12px; color: var(--muted); }
   .countdown { grid-column: 1 / -1; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .now-line { display: flex; align-items: center; gap: 8px; margin: 10px 2px; color: var(--delay); font-size: 11px; font-weight: 700; letter-spacing: .03em; }
+  .now-line::before, .now-line::after { content: ""; flex: 1; border-top: 2px solid var(--delay); }
   .row.extra { border-style: dashed; background: transparent; cursor: default; }
   .row.extra.next-up { background: var(--accent-soft); }
   .est { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
@@ -312,7 +314,22 @@ function buildResultsIndex(scoring) {
 let rides = [];
 let resultsIdx = {};
 let selectedDay = null;   // dayKey chosen by the user; null = auto
-let lastUpdated = null;
+let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
+
+// Last good payloads survive reloads on bad signal (spotty venue cell
+// service): render cached data instantly, stamped with its age, while
+// fetches retry in the background.
+const CACHE_EVENT = "rf2026:event";
+const CACHE_SCORING = "rf2026:scoring";
+function cachePut(key, value) {
+  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), value })); } catch (e) { /* full/blocked */ }
+}
+function cacheGet(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
+}
+function clockInEventTz(ms) {
+  return new Intl.DateTimeFormat("en-US", { timeZone: EVENT_TZ, hour: "numeric", minute: "2-digit" }).format(new Date(ms));
+}
 
 function isoDay(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -432,7 +449,7 @@ function render() {
 
   const isToday = day === todayKey;
   let nextUpFound = false;
-  list.innerHTML = dayRides.map((r, i) => {
+  const rowsHTML = dayRides.map((r, i) => {
     const minsUntil = Math.round((r.adj - now) / 60_000);
     const past = isToday && minsUntil < 0;
     const isNext = isToday && !past && !nextUpFound && (nextUpFound = true);
@@ -476,7 +493,15 @@ function render() {
           ? `<div class="est">est. slot <b>~${fmtClock(r.est.when)}</b> · ${esc(r.est.note)}</div>` : ""}
         ${popoverHTML(r, r.adj, r.delayMin)}
       </div>`;
-  }).join("");
+  });
+
+  // "Now" marker: a thin line at the current time, today only.
+  if (isToday) {
+    let at = dayRides.findIndex(r => r.adj - now >= 0);
+    if (at === -1) at = dayRides.length;
+    rowsHTML.splice(at, 0, `<div class="now-line"><span>now · ${fmtClock(now)}</span></div>`);
+  }
+  list.innerHTML = rowsHTML.join("");
 
   // Tap/click pins the popover open (hover already shows it on desktop).
   for (const rowEl of list.querySelectorAll(".row")) {
@@ -488,9 +513,14 @@ function render() {
     });
   }
 
-  document.getElementById("status").textContent = lastUpdated
-    ? `Updated ${fmtClock(lastUpdated)} · ${FOLLOWING.length} riders followed`
-    : "";
+  let statusText = "";
+  if (lastUpdatedMs) {
+    const ageMin = Math.round((Date.now() - lastUpdatedMs) / 60_000);
+    statusText = ageMin >= 2
+      ? `Showing data from ${clockInEventTz(lastUpdatedMs)} (${ageMin < 60 ? ageMin + " min" : Math.round(ageMin / 60) + " h"} old)`
+      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${FOLLOWING.length} riders followed`;
+  }
+  document.getElementById("status").textContent = statusText;
 }
 
 // ---- Polling (fail-soft: keep showing the last good data on errors) ----
@@ -499,11 +529,13 @@ async function fetchEventFeed() {
   try {
     const resp = await fetch(EVENT_URL);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    rides = extractRides(await resp.json());
-    lastUpdated = eventLocalNow();
+    const feed = await resp.json();
+    rides = extractRides(feed);
+    lastUpdatedMs = Date.now();
+    cachePut(CACHE_EVENT, feed);
     document.getElementById("fetch-err").textContent = "";
   } catch (e) {
-    document.getElementById("fetch-err").textContent = "· update failed, retrying";
+    document.getElementById("fetch-err").textContent = "· can't reach ShowConnect, retrying";
   }
   render();
 }
@@ -512,9 +544,23 @@ async function fetchScoring() {
   try {
     const resp = await fetch(SCORING_URL);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    resultsIdx = buildResultsIndex(await resp.json());
+    const scoring = await resp.json();
+    resultsIdx = buildResultsIndex(scoring);
+    cachePut(CACHE_SCORING, scoring);
     render();
   } catch (e) { /* results are a nicety; ignore failures */ }
+}
+
+// Hydrate from cache so the page is useful immediately, even fully offline.
+{
+  const ev = cacheGet(CACHE_EVENT);
+  if (ev && ev.value) {
+    rides = extractRides(ev.value);
+    lastUpdatedMs = ev.at;
+  }
+  const sc = cacheGet(CACHE_SCORING);
+  if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
+  if (rides.length) render();
 }
 
 // ---- Auto-reload on redeploy ----
