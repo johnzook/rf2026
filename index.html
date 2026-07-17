@@ -75,6 +75,8 @@
   .meta .phase { font-size: 13px; font-weight: 600; }
   .meta .venue { font-size: 12px; color: var(--muted); }
   .countdown { grid-column: 1 / -1; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .row.extra { border-style: dashed; background: transparent; cursor: default; }
+  .row.extra.next-up { background: var(--accent-soft); }
   .est { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
   .est b { font-weight: 650; color: var(--ink); }
   .row.past .countdown { color: var(--past); font-weight: 400; }
@@ -191,6 +193,13 @@ const ESTIMATES = [
   { pinny: 343, phase: "Show Jumping", date: "2026-07-17", time: "2:14 PM", note: "13th of 17 to jump" }, // McMahan (JONB)
   { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:47 PM", note: "12th of 13 to jump" }, // Crocker (JOBNA)
   { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:49 PM", note: "3rd of 12 to jump" },  // Zook (JOBNC)
+];
+
+// One-off schedule items (course walks, etc.) shown inline in the timeline
+// at their start time, alongside the rides.
+const EXTRAS = [
+  { date: "2026-07-17", time: "3:25 PM", title: "Beginner Novice course walk",
+    detail: "3:25–3:55 PM · Ring 4, then water & drag until 4:25 — Shelby & Penelope's divisions" },
 ];
 
 /* ======================================================================== */
@@ -404,10 +413,14 @@ function render() {
   banner.hidden = activeDelays.length === 0 || day !== DELAY_DATE;
   banner.textContent = "Delays: " + activeDelays.map(([v, m]) => `${v} +${m} min`).join(" · ");
 
-  // Rows for the chosen day, sorted by adjusted time.
+  // Rows for the chosen day — rides plus one-off extras — sorted by time.
   const dayRides = rides.filter(r => r.dayKey === day)
-    .map(r => ({ ...r, ...adjustedTime(r) }))
-    .sort((a, b) => a.adj - b.adj);
+    .map(r => ({ ...r, ...adjustedTime(r) }));
+  for (const x of EXTRAS) {
+    const adj = parseConfigTime(x);
+    if (adj && isoDay(adj) === day) dayRides.push({ extra: true, adj, title: x.title, detail: x.detail });
+  }
+  dayRides.sort((a, b) => a.adj - b.adj);
 
   const list = document.getElementById("list");
   if (dayRides.length === 0) {
@@ -430,6 +443,18 @@ function render() {
         : minsUntil === 0 ? "now"
         : minsUntil < 60 ? `in ${minsUntil} min`
         : `in ${Math.floor(minsUntil / 60)} h ${minsUntil % 60} min`;
+    }
+    if (r.extra) {
+      return `
+        <div class="row extra${isNext ? " next-up" : ""}${past ? " past" : ""}">
+          ${isNext ? `<div class="next-tag">Next up</div>` : ""}
+          <div class="time"><div class="adj">${fmtClock(r.adj)}</div></div>
+          <div class="who" style="grid-column: 2 / -1">
+            <div class="rider">${esc(r.title)}</div>
+            <div class="horse">${esc(r.detail)}</div>
+          </div>
+          ${countdown ? `<div class="countdown">${countdown}</div>` : ""}
+        </div>`;
     }
     return `
       <div class="row${isNext ? " next-up" : ""}${past ? " past" : ""}${soon ? " soon" : ""}" data-i="${i}">
