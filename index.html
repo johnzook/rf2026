@@ -616,7 +616,12 @@ async function checkForNewDeploy() {
 }
 
 document.getElementById("now-btn").addEventListener("click", () => {
-  document.querySelector(".now-line")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  const el = document.querySelector(".now-line");
+  if (!el) return;
+  // Put the now-line ~25% down the screen: a little context above, mostly
+  // upcoming rides below.
+  const y = el.getBoundingClientRect().top + window.scrollY - window.innerHeight * 0.25;
+  window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
 });
 window.addEventListener("scroll", updateNowBtn, { passive: true });
 
