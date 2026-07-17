@@ -117,6 +117,13 @@
     color: var(--muted); padding-top: 8px;
   }
   footer { text-align: center; font-size: 11px; color: var(--muted); padding: 20px 0 30px; }
+  #now-btn {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--ink); color: #fff; border: none; border-radius: 999px;
+    padding: 8px 18px; font-size: 13px; font-weight: 600; font-family: inherit;
+    box-shadow: var(--shadow); cursor: pointer; z-index: 30; opacity: .92;
+  }
+  #now-btn[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -132,6 +139,7 @@
 <div id="delay-banner" class="delay-banner" hidden></div>
 <main id="list"><div class="empty">Loading ride times…</div></main>
 <footer>Times are event-local (Mountain). Tap a ride for details.</footer>
+<button id="now-btn" hidden>now</button>
 
 <script>
 /* ========================================================================
@@ -348,6 +356,22 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+let initialScrollDone = false;
+
+// Floating "now" button: visible only when the now-line is off-screen,
+// with an arrow for which way it is. Clicking scrolls back to it.
+function updateNowBtn() {
+  const btn = document.getElementById("now-btn");
+  const el = document.querySelector(".now-line");
+  if (!el) { btn.hidden = true; return; }
+  const r = el.getBoundingClientRect();
+  const headerBottom = document.querySelector("header").getBoundingClientRect().bottom;
+  const above = r.bottom < headerBottom + 8;
+  const below = r.top > window.innerHeight - 8;
+  btn.hidden = !(above || below);
+  if (!btn.hidden) btn.textContent = above ? "↑ now" : "↓ now";
+}
+
 function adjustedTime(ride) {
   if (ride.override) {
     return { adj: ride.override, delayMin: 0, revised: +ride.override !== +ride.when };
@@ -503,6 +527,18 @@ function render() {
   }
   list.innerHTML = rowsHTML.join("");
 
+  // Land on "now" once, at first render of today's list. Never afterwards —
+  // re-renders and data refreshes must not move the screen under the user;
+  // the floating button is the deliberate way back.
+  if (!initialScrollDone && isToday) {
+    const el = document.querySelector(".now-line");
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      initialScrollDone = true;
+    }
+  }
+  updateNowBtn();
+
   // Tap/click pins the popover open (hover already shows it on desktop).
   for (const rowEl of list.querySelectorAll(".row")) {
     rowEl.addEventListener("click", ev => {
@@ -578,6 +614,11 @@ async function checkForNewDeploy() {
     else if (text !== deployBaseline) location.reload();
   } catch (e) { /* offline blip; try again next tick */ }
 }
+
+document.getElementById("now-btn").addEventListener("click", () => {
+  document.querySelector(".now-line")?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+window.addEventListener("scroll", updateNowBtn, { passive: true });
 
 fetchEventFeed();
 fetchScoring();
