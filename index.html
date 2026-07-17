@@ -146,8 +146,12 @@ const FOLLOWING = [
 
 // Per-venue delay in minutes (ring running behind). Edit on a weather day,
 // commit, redeploy — the page picks it up on the next poll after deploy.
+// Delays apply ONLY to rides on this date (event-local), so other days'
+// times are never shifted. On a new weather day, update this date along
+// with the numbers below.
+const DELAY_DATE = "2026-07-17";
+
 // Fri Jul 17: XC ~1h45; SJ ~1h30; FEI dressage (R1) 1h; HT dressage (R2/R3) 1h30.
-// SJR1/SJR3 run Sunday — leave 0 so Sunday times aren't shifted by today's delays.
 const DELAYS = {
   XC: 105,
   SJR1: 0,
@@ -212,7 +216,7 @@ function extractRides(feed) {
       if (!when) continue;
       rides.push({
         when,
-        dayKey: `${when.getFullYear()}-${when.getMonth() + 1}-${when.getDate()}`,
+        dayKey: isoDay(when),
         phase: rd.Phase,
         venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
         rider: e.RiderName,
@@ -247,6 +251,9 @@ let resultsIdx = {};
 let selectedDay = null;   // dayKey chosen by the user; null = auto
 let lastUpdated = null;
 
+function isoDay(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 function fmtClock(d) {
   let h = d.getHours() % 12 || 12;
   const mm = String(d.getMinutes()).padStart(2, "0");
@@ -262,7 +269,7 @@ function esc(s) {
 }
 
 function adjustedTime(ride) {
-  const mins = DELAYS[ride.venue] || 0;
+  const mins = ride.dayKey === DELAY_DATE ? DELAYS[ride.venue] || 0 : 0;
   return { adj: new Date(ride.when.getTime() + mins * 60_000), delayMin: mins };
 }
 
@@ -312,11 +319,10 @@ function popoverHTML(ride, adj, delayMin) {
 
 function render() {
   const now = eventLocalNow();
-  const todayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  const todayKey = isoDay(now);
 
   // Day chips: every day that has followed rides, in order.
-  const dayKeys = [...new Set(rides.map(r => r.dayKey))]
-    .sort((a, b) => a.split("-").map(Number) > b.split("-").map(Number) ? 1 : -1);
+  const dayKeys = [...new Set(rides.map(r => r.dayKey))].sort();
   let day = selectedDay && dayKeys.includes(selectedDay) ? selectedDay : null;
   if (!day) {
     // Default: today if it has rides, else the next day with rides, else the last day.
@@ -332,10 +338,10 @@ function render() {
     btn.onclick = () => { selectedDay = btn.dataset.day; render(); };
   }
 
-  // Delay banner
+  // Delay banner — only when viewing the day the delays apply to.
   const activeDelays = Object.entries(DELAYS).filter(([, m]) => m);
   const banner = document.getElementById("delay-banner");
-  banner.hidden = activeDelays.length === 0;
+  banner.hidden = activeDelays.length === 0 || day !== DELAY_DATE;
   banner.textContent = "Delays: " + activeDelays.map(([v, m]) => `${v} +${m} min`).join(" · ");
 
   // Rows for the chosen day, sorted by adjusted time.
