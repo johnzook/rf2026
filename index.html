@@ -251,6 +251,7 @@ const EVENT_POLL_MS = 20_000;
 const SCORING_POLL_MS = 60_000;
 const DEPLOY_POLL_MS = 60_000;
 const SOON_WINDOW_MIN = 30; // highlight rides within the next N minutes
+const PAST_GRACE_MIN = 10;  // keep a row active this long past its (estimated) time
 
 const MONTHS = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
 
@@ -538,13 +539,18 @@ function render() {
   let nextUpFound = false;
   const rowsHTML = dayRides.map((r, i) => {
     const minsUntil = Math.round((r.adj - now) / 60_000);
-    const past = isToday && minsUntil < 0;
+    // A row isn't "done" at its listed time: an SJ block runs until the
+    // rider's estimated slot, and any ride takes a few minutes — so keep
+    // rows active until (estimate ?? time) + grace.
+    const activeUntil = (r.est && isoDay(r.est.when) === r.dayKey ? r.est.when : r.adj).getTime()
+      + PAST_GRACE_MIN * 60_000;
+    const past = isToday && now.getTime() > activeUntil;
     const isNext = isToday && !past && !nextUpFound && (nextUpFound = true);
     const soon = isToday && !past && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
     if (isToday) {
       countdown = past ? "done"
-        : minsUntil === 0 ? "now"
+        : minsUntil <= 0 ? "underway"
         : minsUntil < 60 ? `in ${minsUntil} min`
         : `in ${Math.floor(minsUntil / 60)} h ${minsUntil % 60} min`;
     }
