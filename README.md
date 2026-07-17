@@ -11,8 +11,10 @@ The entire edit surface is two objects near the top of `index.html`:
 
 - **`FOLLOWING`** — riders to follow, in the feed's exact `"Last, First"`
   format (verbatim, including capitalization).
-- **`DELAYS`** — per-venue delay in minutes. Set on a weather day, commit,
-  redeploy; the page reflects it on the family's next poll after deploy.
+- **`DELAYS`** + **`DELAY_DATE`** — per-venue delay in minutes, applied only
+  to rides on that date. Set both on a weather day and commit to `main`;
+  open pages poll their own URL and auto-reload within a minute of deploy,
+  so no one has to manually refresh.
 
 ## Features
 

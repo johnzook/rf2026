@@ -142,6 +142,8 @@ const FOLLOWING = [
   "Grandia, Marc",       // 35 GHS Calexico, 46 Imhotep de Kreisker, 270 Captain Alfred
   "Yakovac, Reese",      // 147 JB Future Sharp
   "Braitling, Rebecca",  // 62 MBF Braxy V
+  "Goodman, Stephanie",  // 4 Elwenda DP, 10 Korella vd Watermolen, 41 Diranca, 70 Cord Johnson
+  "Crocker, Shelby",     // 192 Sportsfield Harley Davis, 441 LS Chez Bond
 ];
 
 // Per-venue delay in minutes (ring running behind). Edit on a weather day,
@@ -173,6 +175,7 @@ const SCORING_URL = `${EVENT_URL}/scoringLive`;
 const EVENT_TZ = "America/Denver"; // Kalispell, MT
 const EVENT_POLL_MS = 20_000;
 const SCORING_POLL_MS = 60_000;
+const DEPLOY_POLL_MS = 60_000;
 const SOON_WINDOW_MIN = 30; // highlight rides within the next N minutes
 
 const MONTHS = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
@@ -430,10 +433,28 @@ async function fetchScoring() {
   } catch (e) { /* results are a nicety; ignore failures */ }
 }
 
+// ---- Auto-reload on redeploy ----
+// Polls this page's own URL and reloads when the deployed bytes change, so
+// delay/follow-list edits reach open phones within a minute of deploy —
+// no separate signal file to maintain, any commit to the page is the signal.
+let deployBaseline = null;
+async function checkForNewDeploy() {
+  if (!location.protocol.startsWith("http")) return; // no-op for file://
+  try {
+    const resp = await fetch(location.href, { cache: "no-store" });
+    if (!resp.ok) return;
+    const text = await resp.text();
+    if (deployBaseline === null) deployBaseline = text;
+    else if (text !== deployBaseline) location.reload();
+  } catch (e) { /* offline blip; try again next tick */ }
+}
+
 fetchEventFeed();
 fetchScoring();
+checkForNewDeploy();
 setInterval(fetchEventFeed, EVENT_POLL_MS);
 setInterval(fetchScoring, SCORING_POLL_MS);
+setInterval(checkForNewDeploy, DEPLOY_POLL_MS);
 setInterval(render, 30_000); // keep countdowns fresh between fetches
 </script>
 </body>
