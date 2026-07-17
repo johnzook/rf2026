@@ -75,6 +75,8 @@
   .meta .phase { font-size: 13px; font-weight: 600; }
   .meta .venue { font-size: 12px; color: var(--muted); }
   .countdown { grid-column: 1 / -1; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .est { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+  .est b { font-weight: 650; color: var(--ink); }
   .row.past .countdown { color: var(--past); font-weight: 400; }
   .row.soon:not(.next-up) { border-color: var(--soon); background: var(--soon-soft); }
   .next-tag {
@@ -176,6 +178,19 @@ const OVERRIDES = [
   { pinny: 245, phase: "Cross Country", date: "2026-07-17", time: "4:40 PM" }, // Aulita / Ellie
   { pinny: 192, phase: "Cross Country", date: "2026-07-17", time: "5:42 PM" }, // Crocker / Sportsfield Harley Davis
   { pinny: 270, phase: "Cross Country", date: "2026-07-17", time: "6:16 PM" }, // Grandia / Captain Alfred
+  // Friday SJ Ring 4 Beginner Novice block starts (sjring4friBN.pdf):
+  { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:25 PM" }, // Crocker / LS Chez Bond (JOBNA start)
+  { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:45 PM" }, // Zook / Eddy (JOBNC start)
+];
+
+// Estimated individual slot within an SJ block: block start + ~2 min per
+// rider ahead in the printed order of go, skipping riders marked E/R/RF/W
+// (out of the competition, unlikely to start). Shown as secondary info
+// only — the main time stays the official block start.
+const ESTIMATES = [
+  { pinny: 343, phase: "Show Jumping", date: "2026-07-17", time: "2:14 PM", note: "13th of 17 to jump" }, // McMahan (JONB)
+  { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:47 PM", note: "12th of 13 to jump" }, // Crocker (JOBNA)
+  { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:49 PM", note: "3rd of 12 to jump" },  // Zook (JOBNC)
 ];
 
 /* ======================================================================== */
@@ -216,15 +231,26 @@ function eventLocalNow() {
   return new Date(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
 }
 
-// Overrides indexed by pinny+phase, parsed to comparable wall-clock Dates.
-const OVERRIDE_IDX = {};
-for (const o of OVERRIDES) {
+// Parse a config {date: "2026-07-17", time: "4:40 PM"} to a wall-clock Date.
+function parseConfigTime(o) {
   const [y, mo, d] = o.date.split("-").map(Number);
   const t = /^(\d+):(\d+)\s*(AM|PM)$/i.exec(o.time.trim());
-  if (!t) continue;
+  if (!t) return null;
   let h = +t[1] % 12;
   if (t[3].toUpperCase() === "PM") h += 12;
-  OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = new Date(y, mo - 1, d, h, +t[2], 0);
+  return new Date(y, mo - 1, d, h, +t[2], 0);
+}
+
+// Overrides and estimates indexed by pinny+phase.
+const OVERRIDE_IDX = {};
+for (const o of OVERRIDES) {
+  const when = parseConfigTime(o);
+  if (when) OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = when;
+}
+const EST_IDX = {};
+for (const o of ESTIMATES) {
+  const when = parseConfigTime(o);
+  if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
 }
 
 // Flatten EntryList[].RidingDetails[] into ride rows for followed riders.
@@ -243,6 +269,7 @@ function extractRides(feed) {
       rides.push({
         when,
         override,
+        est: EST_IDX[`${e.PinnyNumber}|${rd.Phase}`] || null,
         dayKey: isoDay(override || when), // an override can move a ride's day
         phase: rd.Phase,
         venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
@@ -344,6 +371,7 @@ function popoverHTML(ride, adj, delayMin) {
       <table>
         <tr><td>Division</td><td>${esc(ride.division)}</td></tr>
         <tr><td>${esc(ride.phase)}</td><td>${timeRow} · ${esc(ride.venue)}</td></tr>
+        ${ride.est ? `<tr><td>Est. slot</td><td>~${fmtClock(ride.est.when)} (${esc(ride.est.note)})</td></tr>` : ""}
         ${resultsRows}
       </table>
     </div>`;
@@ -419,6 +447,8 @@ function render() {
           <div class="venue">${esc(r.venue)}${r.divisionShort ? " · " + esc(r.divisionShort) : ""}</div>
         </div>
         ${countdown ? `<div class="countdown">${countdown}</div>` : ""}
+        ${r.est && isoDay(r.est.when) === r.dayKey
+          ? `<div class="est">est. slot <b>~${fmtClock(r.est.when)}</b> · ${esc(r.est.note)}</div>` : ""}
         ${popoverHTML(r, r.adj, r.delayMin)}
       </div>`;
   }).join("");
