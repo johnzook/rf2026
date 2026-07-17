@@ -124,6 +124,24 @@
     box-shadow: var(--shadow); cursor: pointer; z-index: 30; opacity: .92;
   }
   #now-btn[hidden] { display: none; }
+  .linklike { border: none; background: none; color: var(--accent); font-size: 12px; font-weight: 600; padding: 0; cursor: pointer; font-family: inherit; }
+  #rider-sheet { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 40; display: flex; align-items: flex-end; }
+  #rider-sheet[hidden] { display: none; }
+  .sheet-card {
+    background: var(--card); width: 100%; max-width: 640px; margin: 0 auto;
+    border-radius: 16px 16px 0 0; padding: 14px 16px 28px;
+    max-height: 75vh; overflow-y: auto;
+  }
+  .sheet-head { display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
+  #sheet-close { border: none; background: none; font-size: 17px; cursor: pointer; color: var(--muted); padding: 4px 8px; }
+  .sheet-sub { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+  #rider-search { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 4px; font-family: inherit; }
+  .rrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .rrow small { color: var(--muted); }
+  .rbtn { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .rbtn.add { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .rbtn.rm { color: var(--delay); }
+  .rtag { font-size: 12px; color: var(--muted); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -133,6 +151,7 @@
   <div class="sub">
     <span id="status">Loading…</span>
     <span id="fetch-err" class="err"></span>
+    <button id="edit-riders" class="linklike">＋ my riders</button>
   </div>
   <div class="days" id="days"></div>
 </header>
@@ -140,6 +159,16 @@
 <main id="list"><div class="empty">Loading ride times…</div></main>
 <footer>Times are event-local (Mountain). Tap a ride for details.</footer>
 <button id="now-btn" hidden>now</button>
+
+<div id="rider-sheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head"><b>My riders</b><button id="sheet-close" aria-label="Close">✕</button></div>
+    <div class="sheet-sub">Riders you add here are saved on this phone only — everyone else's page is unaffected.</div>
+    <div id="my-riders-list"></div>
+    <input id="rider-search" placeholder="Search rider name…" autocomplete="off">
+    <div id="rider-results"></div>
+  </div>
+</div>
 
 <script>
 /* ========================================================================
@@ -272,11 +301,35 @@ for (const o of ESTIMATES) {
   if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
 }
 
+// Personal additions to the follow list, stored in this browser only.
+// Empty for everyone by default, so the shared page is unaffected.
+const MY_RIDERS_KEY = "rf2026:myRiders";
+function getMyRiders() {
+  try { return JSON.parse(localStorage.getItem(MY_RIDERS_KEY)) || []; } catch (e) { return []; }
+}
+function setMyRiders(list) {
+  try { localStorage.setItem(MY_RIDERS_KEY, JSON.stringify(list)); } catch (e) { /* blocked */ }
+}
+
+// All accepted riders in the feed, for the "my riders" search picker.
+let allRiders = [];
+function buildRiderIndex(feed) {
+  const m = new Map();
+  for (const e of feed.EntryList || []) {
+    if (e.Status !== "Accepted" || !e.RiderName) continue;
+    if (!m.has(e.RiderName)) m.set(e.RiderName, []);
+    m.get(e.RiderName).push(e.HorseName);
+  }
+  allRiders = [...m.entries()].map(([name, horses]) => ({ name, horses }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // Flatten EntryList[].RidingDetails[] into ride rows for followed riders.
 // NOTE: Venues[].date/time are a publish timestamp, not the ride time —
 // the schedule lives only in the RideTimes string.
 function extractRides(feed) {
-  const following = new Set(FOLLOWING);
+  const following = new Set([...FOLLOWING, ...getMyRiders()]);
+  followedCount = following.size;
   const rides = [];
   for (const e of feed.EntryList || []) {
     if (!following.has(e.RiderName)) continue;
@@ -323,6 +376,8 @@ let rides = [];
 let resultsIdx = {};
 let selectedDay = null;   // dayKey chosen by the user; null = auto
 let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
+let lastFeed = null;      // last good feed, for re-filtering after my-riders edits
+let followedCount = FOLLOWING.length;
 
 // Last good payloads survive reloads on bad signal (spotty venue cell
 // service): render cached data instantly, stamped with its age, while
@@ -554,7 +609,7 @@ function render() {
     const ageMin = Math.round((Date.now() - lastUpdatedMs) / 60_000);
     statusText = ageMin >= 2
       ? `Showing data from ${clockInEventTz(lastUpdatedMs)} (${ageMin < 60 ? ageMin + " min" : Math.round(ageMin / 60) + " h"} old)`
-      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${FOLLOWING.length} riders followed`;
+      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followedCount} riders followed`;
   }
   document.getElementById("status").textContent = statusText;
 }
@@ -566,6 +621,8 @@ async function fetchEventFeed() {
     const resp = await fetch(EVENT_URL);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const feed = await resp.json();
+    lastFeed = feed;
+    buildRiderIndex(feed);
     rides = extractRides(feed);
     lastUpdatedMs = Date.now();
     cachePut(CACHE_EVENT, feed);
@@ -591,6 +648,8 @@ async function fetchScoring() {
 {
   const ev = cacheGet(CACHE_EVENT);
   if (ev && ev.value) {
+    lastFeed = ev.value;
+    buildRiderIndex(ev.value);
     rides = extractRides(ev.value);
     lastUpdatedMs = ev.at;
   }
@@ -614,6 +673,48 @@ async function checkForNewDeploy() {
     else if (text !== deployBaseline) location.reload();
   } catch (e) { /* offline blip; try again next tick */ }
 }
+
+// ---- "My riders" picker sheet ----
+
+function renderRiderSheet() {
+  const mine = getMyRiders();
+  document.getElementById("my-riders-list").innerHTML = mine.length
+    ? mine.map(n => `<div class="rrow"><span>${esc(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
+    : `<div class="sheet-sub">No riders added yet — search below.</div>`;
+  const q = document.getElementById("rider-search").value.trim().toLowerCase();
+  const resEl = document.getElementById("rider-results");
+  if (q.length < 2) { resEl.innerHTML = ""; return; }
+  const baked = new Set(FOLLOWING), mineSet = new Set(mine);
+  const hits = allRiders.filter(r => r.name.toLowerCase().includes(q)).slice(0, 20);
+  resEl.innerHTML = hits.length
+    ? hits.map(r => {
+        const action = baked.has(r.name) ? `<span class="rtag">on shared list</span>`
+          : mineSet.has(r.name) ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
+          : `<button class="rbtn add" data-n="${esc(r.name)}">Add</button>`;
+        return `<div class="rrow"><span>${esc(r.name)}<small> · ${esc(r.horses.join(", "))}</small></span>${action}</div>`;
+      }).join("")
+    : `<div class="sheet-sub">No match.</div>`;
+}
+
+document.getElementById("edit-riders").addEventListener("click", () => {
+  document.getElementById("rider-sheet").hidden = false;
+  renderRiderSheet();
+});
+document.getElementById("sheet-close").addEventListener("click", () => {
+  document.getElementById("rider-sheet").hidden = true;
+});
+document.getElementById("rider-sheet").addEventListener("click", ev => {
+  if (ev.target.id === "rider-sheet") { ev.currentTarget.hidden = true; return; } // backdrop tap
+  const btn = ev.target.closest(".rbtn");
+  if (!btn) return;
+  const name = btn.dataset.n;
+  const mine = getMyRiders();
+  setMyRiders(btn.classList.contains("add") ? [...mine, name] : mine.filter(n => n !== name));
+  if (lastFeed) rides = extractRides(lastFeed);
+  renderRiderSheet();
+  render();
+});
+document.getElementById("rider-search").addEventListener("input", renderRiderSheet);
 
 document.getElementById("now-btn").addEventListener("click", () => {
   const el = document.querySelector(".now-line");
