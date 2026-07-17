@@ -135,9 +135,13 @@
 // Riders to follow. Must match the feed's "Last, First" format verbatim,
 // including spelling and capitalization.
 const FOLLOWING = [
-  "Cummings, Anna",
-  "Armstrong, Andy",
-  // ...add the rest of the follow list here
+  "Aulita, Brittany",    // 429 Dynamic Deluxe, 245 Ellie
+  "Zook, Penelope",      // 472 Eddy
+  "McMahan, Galena",     // 343 Dragon In Training
+  "Corkery, Maddie",     // 501 Curlout
+  "Grandia, Marc",       // 35 GHS Calexico, 46 Imhotep de Kreisker, 270 Captain Alfred
+  "Yakovac, Reese",      // 147 JB Future Sharp
+  "Braitling, Rebecca",  // 62 MBF Braxy V
 ];
 
 // Per-venue delay in minutes (ring running behind). Edit on a weather day,
@@ -200,6 +204,7 @@ function extractRides(feed) {
   const rides = [];
   for (const e of feed.EntryList || []) {
     if (!following.has(e.RiderName)) continue;
+    if (e.Status !== "Accepted") continue; // skip scratched entries
     for (const rd of e.RidingDetails || []) {
       const when = parseRideTime(rd.RideTimes); // empty = not yet scheduled
       if (!when) continue;
