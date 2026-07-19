@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rebecca Farm — 2025 vs 2026</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --card: #ffffff;
+    --ink: #1c1c1c;
+    --muted: #6b6b6b;
+    --line: #e3e1dc;
+    --accent: #1a6b3c;
+    --accent-soft: #e6f2ea;
+    --bad: #b91c1c;
+    --bad-soft: #fdeaea;
+    --shadow: 0 10px 30px rgba(0,0,0,.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.4;
+    -webkit-text-size-adjust: 100%;
+  }
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 14px 8px;
+  }
+  h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+  .sub { font-size: 12px; color: var(--muted); margin-top: 1px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .sub .err { color: var(--bad); }
+  .levels { display: flex; gap: 6px; margin-top: 8px; overflow-x: auto; padding-bottom: 2px; }
+  .level-chip {
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    border-radius: 999px; padding: 4px 12px; font-size: 13px; white-space: nowrap;
+    cursor: pointer; font-family: inherit;
+  }
+  .level-chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  main { padding: 12px 14px 60px; max-width: 720px; margin: 0 auto; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 0; font-size: 14px; }
+  .note {
+    margin: 0 0 12px; padding: 8px 12px; border-radius: 10px;
+    background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600;
+  }
+
+  /* Headline tiles */
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px; }
+  @media (min-width: 560px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
+  .tile {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .tile .t-label { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+  .tile .t-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .t-prev { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* Delta chips: arrow + magnitude carry the change; color is a secondary cue.
+     "better"/"worse" is per-metric (more finishers = good, more falls = bad). */
+  .delta { font-size: 12px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .delta.better { color: var(--accent); }
+  .delta.worse { color: var(--bad); }
+  .delta.flat { color: var(--muted); font-weight: 400; }
+
+  section { margin-bottom: 20px; }
+  h2 { font-size: 14px; margin: 0 0 6px; font-weight: 700; }
+  .h2-sub { font-size: 12px; color: var(--muted); margin: -4px 0 8px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+  th { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+  td:first-child, th:first-child { text-align: left; }
+  tbody tr { border-top: 1px solid var(--line); }
+  td.metric { color: var(--ink); font-weight: 500; font-variant-numeric: normal; }
+  td.metric .small, .indent { color: var(--muted); font-weight: 400; }
+  td .frac { color: var(--muted); font-size: 11px; }
+  tr.subrow td.metric { padding-left: 24px; color: var(--muted); font-weight: 400; }
+
+  /* Levels-at-a-glance: wide table scrolls inside its card */
+  .scroll-x { overflow-x: auto; }
+  .glance th, .glance td { white-space: nowrap; }
+  .glance td:first-child { position: sticky; left: 0; background: var(--card); }
+
+  .legend { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend b { color: var(--ink); font-weight: 650; }
+  .method { font-size: 12px; color: var(--muted); }
+  .method h2 { color: var(--ink); }
+  .method table { font-size: 12px; }
+  .method td { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; }
+  .method td:first-child { font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .method a { color: var(--accent); }
+  footer { padding: 0 14px 40px; max-width: 720px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>The Event at Rebecca Farm — 2025 vs 2026</h1>
+  <div class="sub" id="status">Loading both years from ShowConnect…</div>
+  <div class="levels" id="levels" hidden></div>
+</header>
+<main id="main">
+  <div class="empty" id="loading">Fetching entries and live scores for both years…</div>
+</main>
+<footer id="foot" hidden>
+  <section class="method" id="method"></section>
+</footer>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------------------
+// The two events being compared. ShowConnect keeps prior years' feeds live,
+// so both are fetched client-side on load (no polling; reload to refresh).
+// ---------------------------------------------------------------------------
+const YEARS = [
+  { key: '2025', id: 1150, dates: 'Jul 16 – 20, 2025' },
+  { key: '2026', id: 1187, dates: 'Jul 15 – 19, 2026' },
+];
+const API = id => `https://scripts.showconnect.org/api/sc/event/${id}`;
+
+// ---------------------------------------------------------------------------
+// Scoring-code semantics (verified against both years' feeds).
+// A code appears in the column of the phase it happened in and cascades into
+// every later phase column and FinalPlace/FinalPoints, so the FIRST phase
+// (in the division's PhaseOrder) whose column holds a code is where the
+// entry's weekend ended.
+// ---------------------------------------------------------------------------
+const CODE_GROUPS = {
+  W: 'wd', IW: 'wd',              // withdrew (IW = withdrawn at a horse inspection/jog)
+  R: 'ret', MR: 'ret', CR: 'ret', // retired on course (MR/CR = mandatory/compulsory)
+  RF: 'fall',                     // rider fall (elimination)
+  E: 'elim', TE: 'elim', IE: 'elim',
+};
+const GROUP_LABEL = { wd: 'Withdrew', ret: 'Retired', fall: 'Rider fall', elim: 'Eliminated' };
+
+// Numeric parse for scoring cells: '--' and codes are null; '68.2 DR-XC'
+// (a score annotated with a dangerous-riding flag) parses as 68.2.
+function pnum(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s || s === '--' || CODE_GROUPS[s]) return null;
+  const m = s.match(/^-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+// Canonical level for a division name, or null to exclude (e.g. Non-Compete).
+function levelOf(name) {
+  const n = (name || '').toLowerCase();
+  if (!n || n.startsWith('non-compete')) return null;
+  if (n.includes('cci4*-l')) return 'CCI4*-L';
+  if (n.includes('cci4*-s')) return 'CCI4*-S';
+  if (n.includes('cci3*-l')) return 'CCI3*-L';
+  if (n.includes('cci3*-s')) return 'CCI3*-S';
+  if (n.includes('cci2*')) return 'CCI2*-L';
+  if (n.includes('cci1*')) return 'CCI1*';
+  if (n.includes('intermediate')) return 'Intermediate';
+  if (n.includes('preliminary')) return 'Preliminary';
+  if (n.includes('modified')) return 'Modified';
+  if (n.includes('training')) return 'Training';
+  if (n.includes('beginner novice')) return 'Beginner Novice';
+  if (n.includes('novice')) return 'Novice';
+  return null;
+}
+const LEVEL_ORDER = ['CCI4*-L', 'CCI4*-S', 'CCI3*-L', 'CCI3*-S', 'CCI2*-L', 'CCI1*',
+  'Intermediate', 'Preliminary', 'Modified', 'Training', 'Novice', 'Beginner Novice'];
+
+// Columns to scan for a status code, per phase, in the division's PhaseOrder
+// ('d-xc-sj' for horse trials, 'd-e-xc-sj' for the classic three-days).
+function phaseSeq(order) {
+  const seq = [];
+  for (const p of (order || 'd-xc-sj').split('-')) {
+    if (p === 'd') seq.push({ key: 'dressage', cols: ['DressagePlace', 'DressageScore'] });
+    else if (p === 'e') seq.push({ key: 'endurance', cols: ['ThreeDayPhaseATimePenalty', 'ThreeDayPhaseBTimePenalty', 'ThreeDayPhaseBJumpPenalty', 'ThreeDayPhaseCTimePenalty'] });
+    else if (p === 'xc') seq.push({ key: 'xc', cols: ['XCPlace', 'XCScore', 'XCTimePenalty'] });
+    else if (p === 'sj') seq.push({ key: 'sj', cols: ['SJPlace', 'SJScore', 'SJTimePenalty'] });
+  }
+  return seq;
+}
+
+// One scoring row -> everything the aggregator needs to know about it.
+function classifyRow(r, phaseOrder) {
+  let incident = null;
+  for (const ph of phaseSeq(phaseOrder)) {
+    for (const c of ph.cols) {
+      const v = String(r[c] == null ? '' : r[c]).trim();
+      if (CODE_GROUPS[v]) { incident = { phase: ph.key, code: v, group: CODE_GROUPS[v] }; break; }
+    }
+    if (incident) break;
+  }
+  if (!incident) {
+    const f = String(r.FinalPlace == null ? '' : r.FinalPlace).trim();
+    if (CODE_GROUPS[f]) incident = { phase: 'final', code: f, group: CODE_GROUPS[f] };
+  }
+
+  const dressage = pnum(r.DressageScore);
+  // A withdrawal with no dressage score on the books never started the
+  // competition (the code shows up in a later column, e.g. DR '--' XC 'W').
+  // A row with no numbers and no code at all is an unrecorded no-show.
+  const hasAnyNumber = dressage != null || pnum(r.XCScore) != null || pnum(r.SJScore) != null || pnum(r.FinalPlace) != null;
+  const neverStarted = (incident && incident.group === 'wd' && dressage == null) || (!incident && !hasAnyNumber);
+  const started = !neverStarted;
+
+  const xcCompleted = pnum(r.XCScore) != null;
+  const xcStarted = xcCompleted || (incident != null && incident.phase === 'xc' && incident.group !== 'wd');
+  const xcJump = xcStarted ? pnum(r.XCJumpPenalty) : null;
+  const refusals = xcJump != null ? Math.floor(xcJump / 20) : null; // 20/40/60… = refusals & run-outs
+  const frangible = xcJump != null && (xcJump % 20) > 0;            // +11/+15 remainders = frangible-device / flag penalties
+  const xcTime = xcCompleted ? pnum(r.XCTimePenalty) : null;
+
+  const sjCompleted = pnum(r.SJScore) != null;
+  const sjJump = sjCompleted ? pnum(r.SJJumpPenalty) : null;
+
+  const finished = pnum(r.FinalPlace) != null;
+  const finalPts = pnum(r.FinalPoints);
+  const finishedOnDressage = finished && dressage != null && finalPts != null && Math.abs(finalPts - dressage) < 0.05;
+
+  return { incident, dressage, started, neverStarted, xcStarted, xcCompleted, xcJump, refusals, frangible, xcTime, sjCompleted, sjJump, finished, finishedOnDressage };
+}
+
+function blankStats() {
+  return {
+    scratched: 0, entries: 0, neverStarted: 0, started: 0,
+    // incident tallies keyed `${phase}_${group}`, e.g. xc_ret, sj_wd
+    inc: {},
+    xcStarters: 0, xcCompleted: 0, xcRecorded: 0, xcRefused: 0, xcRefusalCount: 0,
+    xcClearJump: 0, xcDoubleClear: 0, xcFrangible: 0, xcInsideTime: 0, xcTimeSum: 0, xcTimeN: 0,
+    sjRounds: 0, sjClear: 0,
+    drSum: 0, drN: 0,
+    finished: 0, finishedOnDressage: 0,
+  };
+}
+
+function addRow(st, c) {
+  st.entries += 1;
+  if (c.neverStarted) { st.neverStarted += 1; return; }
+  st.started += 1;
+  if (c.dressage != null) { st.drSum += c.dressage; st.drN += 1; }
+  if (c.incident) {
+    const k = `${c.incident.phase}_${c.incident.group}`;
+    st.inc[k] = (st.inc[k] || 0) + 1;
+  }
+  if (c.xcStarted) {
+    st.xcStarters += 1;
+    if (c.xcCompleted) st.xcCompleted += 1;
+    if (c.xcJump != null) {
+      st.xcRecorded += 1;
+      if (c.refusals > 0) { st.xcRefused += 1; st.xcRefusalCount += c.refusals; }
+      if (c.frangible) st.xcFrangible += 1;
+      if (c.xcJump === 0 && c.xcCompleted) {
+        st.xcClearJump += 1;
+        if (c.xcTime === 0) st.xcDoubleClear += 1;
+      }
+    }
+    if (c.xcTime != null) {
+      st.xcTimeSum += c.xcTime; st.xcTimeN += 1;
+      if (c.xcTime === 0) st.xcInsideTime += 1;
+    }
+  }
+  if (c.sjCompleted) {
+    st.sjRounds += 1;
+    if (c.sjJump === 0) st.sjClear += 1;
+  }
+  if (c.finished) {
+    st.finished += 1;
+    if (c.finishedOnDressage) st.finishedOnDressage += 1;
+  }
+}
+
+// scoring feed + entry feed -> { byLevel: Map(level -> stats), overall: stats }
+function aggregate(scoring, feed) {
+  const divById = {};
+  for (const d of (scoring.DivisionsList || [])) divById[d.DivisionId] = d;
+  const byLevel = new Map();
+  const level = lv => {
+    if (!byLevel.has(lv)) byLevel.set(lv, blankStats());
+    return byLevel.get(lv);
+  };
+  for (const e of ((feed && feed.EntryList) || [])) {
+    const lv = levelOf(e.Division);
+    if (lv && e.Status === 'Scratched') level(lv).scratched += 1;
+  }
+  for (const r of (scoring.ScoringList || [])) {
+    const div = divById[r.DivisionId] || {};
+    const lv = levelOf(div.DivisionName);
+    if (!lv) continue;
+    addRow(level(lv), classifyRow(r, div.PhaseOrder));
+  }
+  const overall = blankStats();
+  for (const st of byLevel.values()) {
+    for (const k of Object.keys(overall)) {
+      if (k === 'inc') continue;
+      overall[k] += st[k];
+    }
+    for (const [k, v] of Object.entries(st.inc)) overall.inc[k] = (overall.inc[k] || 0) + v;
+  }
+  return { byLevel, overall };
+}
+
+const inc = (st, k) => (st.inc[k] || 0);
+const incPhase = (st, phase) => ['wd', 'ret', 'fall', 'elim'].reduce((s, g) => s + inc(st, `${phase}_${g}`), 0);
+
+// ---------------------------------------------------------------------------
+// Metric definitions: how each row of the tables is computed and whether an
+// increase in 2026 is better (+1), worse (-1) or neutral (0).
+// kind 'count' renders n; 'pct' renders n (pct-of-den); 'avg' renders sum/n.
+// ---------------------------------------------------------------------------
+const SECTIONS = [
+  {
+    title: 'The field',
+    sub: 'Counts are entries (horse-and-rider combinations), not unique riders.',
+    rows: [
+      { label: 'Scratched before the event', kind: 'count', dir: 0, n: s => s.scratched },
+      { label: 'Entries on the scoreboard', kind: 'count', dir: 0, n: s => s.entries },
+      { label: 'Withdrew without starting', kind: 'count', dir: -1, n: s => s.neverStarted },
+      { label: 'Started the competition', kind: 'count', dir: 0, n: s => s.started },
+    ],
+  },
+  {
+    title: 'Where the weekend ended early',
+    sub: 'Each entry counted once, in the phase its weekend ended.',
+    rows: [
+      { label: 'Withdrew mid-event', kind: 'pct', dir: -1, n: s => inc(s, 'xc_wd') + inc(s, 'sj_wd') + inc(s, 'final_wd') + inc(s, 'endurance_wd'), d: s => s.started },
+      { label: 'before cross country', sub: true, kind: 'count', dir: -1, n: s => inc(s, 'xc_wd') },
+      { label: 'before show jumping (incl. jog-outs)', sub: true, kind: 'count', dir: -1, n: s => inc(s, 'sj_wd') + inc(s, 'final_wd') },
+      { label: 'Retired on cross country', kind: 'pct', dir: -1, n: s => inc(s, 'xc_ret'), d: s => s.xcStarters },
+      { label: 'Rider fall on cross country', kind: 'pct', dir: -1, n: s => inc(s, 'xc_fall'), d: s => s.xcStarters },
+      { label: 'Eliminated on cross country', kind: 'pct', dir: -1, n: s => inc(s, 'xc_elim'), d: s => s.xcStarters },
+      { label: 'Out in show jumping (ret/fall/elim)', kind: 'count', dir: -1, n: s => inc(s, 'sj_ret') + inc(s, 'sj_fall') + inc(s, 'sj_elim') },
+      { label: 'Out in dressage or steeplechase', kind: 'count', dir: -1, n: s => incPhase(s, 'dressage') + incPhase(s, 'endurance') - inc(s, 'dressage_wd') - inc(s, 'endurance_wd') },
+    ],
+  },
+  {
+    title: 'Cross country, like for like',
+    sub: 'Rates over cross-country starters, so different field sizes compare cleanly.',
+    rows: [
+      { label: 'Cross-country starters', kind: 'count', dir: 0, n: s => s.xcStarters },
+      { label: 'Completed the course', kind: 'pct', dir: +1, n: s => s.xcCompleted, d: s => s.xcStarters },
+      { label: 'Had a refusal or run-out', kind: 'pct', dir: -1, n: s => s.xcRefused, d: s => s.xcRecorded },
+      { label: 'Refusals per 100 rounds', kind: 'rate', dir: -1, n: s => s.xcRefusalCount, d: s => s.xcRecorded },
+      { label: 'Clear jumping round', kind: 'pct', dir: +1, n: s => s.xcClearJump, d: s => s.xcStarters },
+      { label: 'Clear round inside the time', kind: 'pct', dir: +1, n: s => s.xcDoubleClear, d: s => s.xcStarters },
+      { label: 'Inside the time (of completions)', kind: 'pct', dir: +1, n: s => s.xcInsideTime, d: s => s.xcTimeN },
+      { label: 'Avg time penalties (completions)', kind: 'avg', dir: -1, n: s => s.xcTimeSum, d: s => s.xcTimeN },
+      { label: 'Frangible-pin / flag penalties', kind: 'count', dir: -1, n: s => s.xcFrangible },
+    ],
+  },
+  {
+    title: 'The rest of the weekend',
+    rows: [
+      { label: 'Average dressage score', kind: 'avg', dir: -1, n: s => s.drSum, d: s => s.drN },
+      { label: 'Show jumping clear rounds', kind: 'pct', dir: +1, n: s => s.sjClear, d: s => s.sjRounds },
+      { label: 'Completed the event (of starters)', kind: 'pct', dir: +1, n: s => s.finished, d: s => s.started },
+      { label: 'Finished on their dressage score', kind: 'pct', dir: +1, n: s => s.finishedOnDressage, d: s => s.finished },
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+const results = {};        // year key -> { byLevel, overall }
+let activeLevel = 'All levels';
+
+const fmtPct = (n, d) => d ? (100 * n / d).toFixed(1) + '%' : '—';
+const fmtAvg = (n, d) => d ? (n / d).toFixed(1) : '—';
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+function statsFor(yearKey) {
+  const r = results[yearKey];
+  if (!r) return null;
+  if (activeLevel === 'All levels') return r.overall;
+  return r.byLevel.get(activeLevel) || blankStats();
+}
+
+// Value + delta for one metric row across the two years.
+function metricValues(row) {
+  const out = {};
+  for (const y of YEARS) {
+    const s = statsFor(y.key);
+    if (!s) { out[y.key] = { text: '—' }; continue; }
+    const n = row.n(s);
+    const d = row.d ? row.d(s) : null;
+    if (row.kind === 'count') out[y.key] = { num: n, text: String(n) };
+    else if (row.kind === 'pct') out[y.key] = { num: d ? 100 * n / d : null, text: d ? `${fmtPct(n, d)} <span class="frac">${n}/${d}</span>` : '—' };
+    else if (row.kind === 'rate') out[y.key] = { num: d ? 100 * n / d : null, text: d ? (100 * n / d).toFixed(1) : '—' };
+    else out[y.key] = { num: d ? n / d : null, text: fmtAvg(n, d) };
+  }
+  const a = out[YEARS[0].key], b = out[YEARS[1].key];
+  let delta = '';
+  if (a && b && a.num != null && b.num != null) {
+    const diff = b.num - a.num;
+    const mag = row.kind === 'count' ? String(Math.abs(Math.round(diff))) : Math.abs(diff).toFixed(1) + (row.kind === 'pct' ? ' pp' : '');
+    if (Math.abs(diff) < (row.kind === 'count' ? 0.5 : 0.05)) delta = '<span class="delta flat">=</span>';
+    else {
+      const arrow = diff > 0 ? '▲' : '▼';
+      const cls = row.dir === 0 ? 'flat' : (diff > 0 ? row.dir > 0 : row.dir < 0) ? 'better' : 'worse';
+      const word = cls === 'better' ? 'better' : cls === 'worse' ? 'worse' : 'change';
+      delta = `<span class="delta ${cls}" title="${word} than 2025">${arrow} ${mag}</span>`;
+    }
+  }
+  return { a, b, delta };
+}
+
+function tileHtml(label, row) {
+  const { a, b, delta } = metricValues(row);
+  return `<div class="tile">
+    <div class="t-label">${esc(label)}</div>
+    <div class="t-value">${b ? b.text.replace(/<span.*$/, '') : '—'} ${delta}</div>
+    <div class="t-prev">2025: ${a ? a.text.replace(/<span.*$/, '') : '—'}</div>
+  </div>`;
+}
+
+function sectionHtml(sec) {
+  const rows = sec.rows.map(row => {
+    const { a, b, delta } = metricValues(row);
+    return `<tr${row.sub ? ' class="subrow"' : ''}>
+      <td class="metric">${esc(row.label)}</td>
+      <td>${a ? a.text : '—'}</td>
+      <td>${b ? b.text : '—'}</td>
+      <td>${delta}</td>
+    </tr>`;
+  }).join('');
+  return `<section>
+    <h2>${esc(sec.title)}</h2>
+    ${sec.sub ? `<div class="h2-sub">${esc(sec.sub)}</div>` : ''}
+    <div class="card"><table>
+      <thead><tr><th></th><th>2025</th><th>2026</th><th>Δ</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function glanceHtml() {
+  const r25 = results['2025'], r26 = results['2026'];
+  if (!r25 || !r26) return '';
+  const levels = LEVEL_ORDER.filter(lv => r25.byLevel.has(lv) || r26.byLevel.has(lv));
+  const cell = (st, n, d) => st && d(st) ? `${fmtPct(n(st), d(st))}` : '—';
+  const rows = levels.map(lv => {
+    const a = r25.byLevel.get(lv), b = r26.byLevel.get(lv);
+    return `<tr>
+      <td class="metric">${esc(lv)}</td>
+      <td>${a ? a.xcStarters : 0} / ${b ? b.xcStarters : 0}</td>
+      <td>${cell(a, s => s.xcCompleted, s => s.xcStarters)}</td><td>${cell(b, s => s.xcCompleted, s => s.xcStarters)}</td>
+      <td>${cell(a, s => s.xcRefused, s => s.xcRecorded)}</td><td>${cell(b, s => s.xcRefused, s => s.xcRecorded)}</td>
+      <td>${cell(a, s => s.finished, s => s.started)}</td><td>${cell(b, s => s.finished, s => s.started)}</td>
+    </tr>`;
+  }).join('');
+  return `<section>
+    <h2>Levels at a glance</h2>
+    <div class="h2-sub">XC starters shown 2025 / 2026; tap a level chip above for the full breakdown.</div>
+    <div class="card scroll-x"><table class="glance">
+      <thead><tr><th>Level</th><th>XC starters</th><th>XC done ’25</th><th>’26</th><th>Refusal ’25</th><th>’26</th><th>Finished ’25</th><th>’26</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function methodHtml() {
+  return `<h2>How these numbers are computed</h2>
+  <p>Both columns come straight from ShowConnect's public feeds for
+  <a href="${API(1150)}">2025 (event 1150)</a> and <a href="${API(1187)}">2026 (event 1187)</a>,
+  fetched when this page loads. "Scratched before the event" comes from the entry list;
+  everything else from the live scoring list. The Non-Compete division is excluded.
+  Divisions are grouped into levels (all Sr./Jr. sections of a level combined; the
+  classic Training/Novice Three-Days are counted with Training and Novice).</p>
+  <p>A status code appears in the column of the phase where it happened and is carried
+  into later columns, so each entry is attributed to the <b>first</b> phase showing a code:</p>
+  <table>
+    <tr><td>W / IW</td><td>Withdrew (IW = at a horse inspection). A withdrawal with no dressage score counts as "withdrew without starting".</td></tr>
+    <tr><td>R / MR / CR</td><td>Retired on course (MR/CR = mandatory or compulsory, e.g. after a horse fall).</td></tr>
+    <tr><td>RF</td><td>Rider fall — mandatory elimination.</td></tr>
+    <tr><td>E / TE / IE</td><td>Eliminated (TE = technical, e.g. missed a fence).</td></tr>
+  </table>
+  <p>Cross-country jump penalties are 20/40/60… for refusals and run-outs; odd remainders
+  (+11, +15) are frangible-device or missed-flag penalties, counted separately and
+  <b>not</b> as refusals. Refusal rates use entries with a recorded jump-penalty figure as the
+  denominator — that includes most horses later eliminated or retired (their penalties up to
+  that point are posted), so it is a fair like-for-like rate; the few rows with no figure
+  recorded are left out of both years the same way.</p>
+  <p>"Finished on their dressage score" = final score equals dressage score (no jumping or
+  time penalties all weekend). All counts are entries (horse-and-rider combinations) —
+  a rider on three horses counts three times.</p>`;
+}
+
+function render() {
+  const main = document.getElementById('main');
+  const have25 = !!results['2025'], have26 = !!results['2026'];
+  if (!have25 && !have26) return;
+
+  const parts = [];
+  if (results.liveNote) parts.push(`<div class="note">${esc(results.liveNote)}</div>`);
+  parts.push(`<div class="tiles">
+    ${tileHtml('Entries', { kind: 'count', dir: 0, n: s => s.entries })}
+    ${tileHtml('Completed XC', { kind: 'pct', dir: +1, n: s => s.xcCompleted, d: s => s.xcStarters })}
+    ${tileHtml('XC refusal rate', { kind: 'pct', dir: -1, n: s => s.xcRefused, d: s => s.xcRecorded })}
+    ${tileHtml('Finished event', { kind: 'pct', dir: +1, n: s => s.finished, d: s => s.started })}
+  </div>`);
+  for (const sec of SECTIONS) parts.push(sectionHtml(sec));
+  if (activeLevel === 'All levels') parts.push(glanceHtml());
+  parts.push(`<div class="legend">Δ compares 2026 with 2025: <b>▲/▼</b> show the direction of change,
+  green = better than last year, red = worse, gray = neutral (field-size changes aren't good or bad).
+  Percentages show the fraction they're computed from.</div>`);
+  main.innerHTML = parts.join('');
+
+  document.getElementById('method').innerHTML = methodHtml();
+  document.getElementById('foot').hidden = false;
+}
+
+function renderChips() {
+  const holder = document.getElementById('levels');
+  const present = new Set();
+  for (const y of YEARS) {
+    const r = results[y.key];
+    if (r) for (const lv of r.byLevel.keys()) present.add(lv);
+  }
+  const chips = ['All levels', ...LEVEL_ORDER.filter(lv => present.has(lv))];
+  holder.innerHTML = chips.map(lv =>
+    `<button class="level-chip${lv === activeLevel ? ' active' : ''}" data-level="${esc(lv)}">${esc(lv)}</button>`).join('');
+  holder.hidden = false;
+  holder.querySelectorAll('.level-chip').forEach(btn => btn.addEventListener('click', () => {
+    activeLevel = btn.dataset.level;
+    renderChips();
+    render();
+  }));
+}
+
+function setStatus(html) { document.getElementById('status').innerHTML = html; }
+
+async function load() {
+  const errs = [];
+  await Promise.all(YEARS.map(async y => {
+    try {
+      const [scoringRes, feedRes] = await Promise.all([
+        fetch(`${API(y.id)}/scoringLive`),
+        fetch(API(y.id)),
+      ]);
+      if (!scoringRes.ok) throw new Error(`scoring HTTP ${scoringRes.status}`);
+      const scoring = await scoringRes.json();
+      const feed = feedRes.ok ? await feedRes.json() : null;
+      results[y.key] = aggregate(scoring, feed);
+      if (y.key === '2026' && (scoring.DivisionsList || []).some(d => d.DivisionStatus && d.DivisionStatus !== 'FINAL')) {
+        results.liveNote = 'Some 2026 divisions were still posting scores when this page loaded — 2026 numbers may still move. Reload for the latest.';
+      }
+    } catch (e) {
+      errs.push(`${y.key}: ${e.message}`);
+    }
+  }));
+  const loading = document.getElementById('loading');
+  if (loading) loading.remove();
+  if (errs.length) {
+    setStatus(`<span class="err">Couldn't load ${errs.join(' · ')}</span> — reload to retry.`);
+    if (!results['2025'] && !results['2026']) {
+      document.getElementById('main').innerHTML = '<div class="empty">No data — check the connection and reload.</div>';
+      return;
+    }
+  } else {
+    setStatus(`${YEARS.map(y => `${y.key}: ${y.dates}`).join(' · ')} · fetched ${new Date().toLocaleTimeString()}`);
+  }
+  renderChips();
+  render();
+}
+
+load();
+</script>
+</body>
+</html>

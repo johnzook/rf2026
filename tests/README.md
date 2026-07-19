@@ -3,6 +3,13 @@
 Automated Playwright suite covering every numbered behavior in
 [`../TESTPLAN.md`](../TESTPLAN.md) (items A1–N54).
 
+`compare.test.js` additionally covers `compare.html` (the 2025-vs-2026
+statistics page): scoring-code parsing and phase attribution, level
+grouping, refusal/frangible arithmetic, aggregation, and rendering
+(chips, delta direction, per-year fetch failure, live-data note). It has
+its own mini-harness in-file since the page stubs four API routes (two
+per year) instead of index.html's two.
+
 ## Running
 
 ```sh
