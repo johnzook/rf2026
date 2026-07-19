@@ -510,6 +510,17 @@ function nextRideInfo(ride, now) {
   return `next: ${esc(PHASE_SHORT[best.phase] || best.phase)} ${day}${fmtClock(t)}`;
 }
 
+// A posted phase score means this ride already happened — used to end the
+// "underway" state immediately instead of waiting out the grace window.
+// Numeric scores only: out codes (E/R/MR...) keep the out-row treatment.
+const PHASE_DONE_FIELD = { "Dressage": "DressageScore", "Cross Country": "XCScore", "Show Jumping": "SJScore" };
+function phaseResultPosted(ride) {
+  const res = resultsIdx[`${ride.pinny}|${ride.division}`];
+  const field = PHASE_DONE_FIELD[ride.phase];
+  if (!res || !field) return false;
+  return !isNaN(parseFloat(res[field]));
+}
+
 // A combo may be done riding while its division is still running — placings
 // can change until the last rider in the division's final phase has gone.
 // "finished Nth overall" must wait for that; until then it's "currently".
@@ -684,7 +695,10 @@ function render() {
     const activeUntil = (r.est ? r.est.when : r.adj).getTime()
       + PAST_GRACE_MIN * 60_000;
     const isPastDay = day < todayKey;
-    const past = isPastDay || (isToday && now.getTime() > activeUntil);
+    // Done when the grace window runs out — or as soon as the score posts
+    // for a ride whose listed time has passed (never for future rides).
+    const past = isPastDay || (isToday && (now.getTime() > activeUntil
+      || (minsUntil <= 0 && !r.extra && phaseResultPosted(r))));
     const out = r.extra ? null : outStatus(r);
     const isNext = isToday && !past && !out && !nextUpFound && (nextUpFound = true);
     const nextTag = minsUntil <= 0 ? "Now" : "Next up";

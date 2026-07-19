@@ -68,7 +68,12 @@ in a deploy goes unnoticed until someone misses a ride.
 entries (or show "7 of 9 found" when they differ), and/or surface
 unmatched names in the my-riders sheet.
 
-## 5. "underway" lingers for the whole grace window after the result posts
+## 5. ~~"underway" lingers for the whole grace window after the result posts~~ FIXED
+
+Resolved: a numerically posted phase score now ends the underway state
+immediately (once the listed time has passed). Covered by test `F23b`.
+
+### Original note
 
 **Today:** a row stays "underway" until (estimate ?? adjusted time) +
 10 min, even if the scoring feed has already posted this phase's score —

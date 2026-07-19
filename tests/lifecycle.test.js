@@ -49,6 +49,39 @@ test('F23: activeUntil = listed time + 10 min grace; estimates extend it', async
   } finally { await s.context.close(); }
 });
 
+test('F23b: a posted phase score ends "underway" immediately; never a future ride; out codes excluded', async () => {
+  const s = await openPage({ server, feed: dayFeed(), now: NOON });
+  try {
+    // 641 (11:55) is inside its grace window -> underway...
+    assert.equal((await rowInfo(s.page, 641)).countdown, 'underway');
+    // ...until its phase score posts, which flips it to done at once.
+    await s.page.evaluate(() => {
+      resultsIdx['641|Test Division'] = { DressageScore: '31.0', DressagePlace: '2', FinalPlace: '2' };
+      scoringByDiv['Test Division'] = [resultsIdx['641|Test Division']];
+      render();
+    });
+    const done = await rowInfo(s.page, 641);
+    assert.ok(done.classes.includes('past'), 'posted score ends the grace window');
+    assert.ok(done.countdown.startsWith('✓ Dressage 2nd'), done.countdown);
+
+    // A posted score never marks a FUTURE ride done (642 rides at 12:20).
+    await s.page.evaluate(() => {
+      resultsIdx['642|Test Division'] = { DressageScore: '30.0', DressagePlace: '1', FinalPlace: '1' };
+      render();
+    });
+    assert.equal((await rowInfo(s.page, 642)).countdown, 'in 20 min');
+
+    // An out code in the score field is not a posted result.
+    await s.page.evaluate(() => {
+      resultsIdx['641|Test Division'].DressageScore = 'E';
+      resultsIdx['641|Test Division'].DressagePlace = '';
+      resultsIdx['641|Test Division'].FinalPlace = 'E';
+      render();
+    });
+    assert.equal((await rowInfo(s.page, 641)).countdown, 'eliminated');
+  } finally { await s.context.close(); }
+});
+
 test('F24: countdown wording: "in N min", "in H h M min", "underway"', async () => {
   const s = await openPage({ server, feed: dayFeed(), now: NOON });
   try {
