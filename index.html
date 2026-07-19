@@ -68,6 +68,10 @@
   .row.past { opacity: .55; }
   .row.past.pinned { opacity: 1; }
   @media (hover: hover) { .row.past:hover { opacity: 1; } }
+  .row.out { opacity: .75; }
+  .row.out.pinned { opacity: 1; }
+  @media (hover: hover) { .row.out:hover { opacity: 1; } }
+  .row.out .countdown { color: var(--muted); }
   .time { text-align: right; }
   .time .adj { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .time .orig { font-size: 11px; color: var(--delay); text-decoration: line-through; font-variant-numeric: tabular-nums; }
@@ -442,6 +446,17 @@ function updateNowBtn() {
   if (!btn.hidden) btn.textContent = above ? "↑ now" : "↓ now";
 }
 
+// Non-numeric FinalPlace codes in the scoring feed mean the combo is out
+// of the competition and not expected at later phases.
+const OUT_WORDS = {
+  E: "eliminated", IE: "eliminated", TE: "eliminated",
+  R: "retired", MR: "retired", RF: "rider fall", W: "withdrawn", IW: "withdrawn",
+};
+function outStatus(ride) {
+  const res = resultsIdx[`${ride.pinny}|${ride.division}`];
+  return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
+}
+
 function adjustedTime(ride) {
   if (ride.override) {
     return { adj: ride.override, delayMin: 0, revised: +ride.override !== +ride.when };
@@ -551,11 +566,14 @@ function render() {
     const activeUntil = (r.est && isoDay(r.est.when) === r.dayKey ? r.est.when : r.adj).getTime()
       + PAST_GRACE_MIN * 60_000;
     const past = isToday && now.getTime() > activeUntil;
-    const isNext = isToday && !past && !nextUpFound && (nextUpFound = true);
+    const out = r.extra ? null : outStatus(r);
+    const isNext = isToday && !past && !out && !nextUpFound && (nextUpFound = true);
     const nextTag = minsUntil <= 0 ? "Now" : "Next up";
-    const soon = isToday && !past && minsUntil <= SOON_WINDOW_MIN;
+    const soon = isToday && !past && !out && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
-    if (isToday) {
+    if (out && !past) {
+      countdown = `${out} — not expected to ride`;
+    } else if (isToday) {
       countdown = past ? "done"
         : minsUntil <= 0 ? "underway"
         : minsUntil < 60 ? `in ${minsUntil} min`
@@ -574,7 +592,7 @@ function render() {
         </div>`;
     }
     return `
-      <div class="row${isNext ? " next-up" : ""}${past ? " past" : ""}${soon ? " soon" : ""}" data-i="${i}">
+      <div class="row${isNext ? " next-up" : ""}${past ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}">
         ${isNext ? `<div class="next-tag">${nextTag}</div>` : ""}
         <div class="time">
           <div class="adj">${fmtClock(r.adj)}</div>
