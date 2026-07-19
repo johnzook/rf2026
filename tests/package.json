@@ -1,0 +1,11 @@
+{
+  "name": "rf2026-tests",
+  "private": true,
+  "description": "Automated Playwright test suite for index.html (see ../TESTPLAN.md)",
+  "scripts": {
+    "test": "node --test --test-concurrency=1"
+  },
+  "dependencies": {
+    "playwright-core": "^1.61.1"
+  }
+}
