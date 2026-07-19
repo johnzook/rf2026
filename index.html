@@ -526,16 +526,27 @@ function divisionComplete(divisionName) {
 
 // Places for a completed ride, from the scoring join. The phase label
 // binds the place to this specific ride; the overall wording says whether
-// the combo is still competing ("currently") or finished ("finished").
+// the combo is still competing ("currently") or finished ("finished");
+// a "T" prefix marks a place shared with another combo in the division.
 const PHASE_PLACE_FIELD = { "Dressage": "DressagePlace", "Cross Country": "XCPlace", "Show Jumping": "SJPlace" };
+function tiedAt(divisionName, field, place) {
+  let n = 0;
+  for (const s of scoringByDiv[divisionName] || []) {
+    if (parseInt(s[field], 10) === place) n++;
+  }
+  return n > 1;
+}
 function donePlaces(ride, isFinal) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   if (!res) return { phase: null, overall: null };
-  const pp = parseInt(res[PHASE_PLACE_FIELD[ride.phase]], 10);
+  const pf = PHASE_PLACE_FIELD[ride.phase];
+  const pp = parseInt(res[pf], 10);
   const op = parseInt(res.FinalPlace, 10);
+  const ppT = pp && tiedAt(ride.division, pf, pp) ? "T" : "";
+  const opT = op && tiedAt(ride.division, "FinalPlace", op) ? "T" : "";
   return {
-    phase: pp ? `${PHASE_SHORT[ride.phase] || ride.phase} ${pp}${ordinal(pp)}` : null,
-    overall: op ? `${isFinal ? "finished" : "currently"} ${op}${ordinal(op)} overall` : null,
+    phase: pp ? `${PHASE_SHORT[ride.phase] || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
+    overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)} overall` : null,
   };
 }
 
@@ -568,11 +579,11 @@ function adjustedTime(ride) {
 }
 
 // Result cell: "--" / "" from the feed means not yet posted.
-function resCell(score, place) {
+function resCell(score, place, tied) {
   const has = v => v != null && v !== "" && v !== "--";
   if (!has(score) && !has(place)) return `<span class="pending">—</span>`;
   let out = has(score) ? esc(score) : "";
-  if (has(place)) out += ` <span class="place">(${esc(place)}${ordinal(place)})</span>`;
+  if (has(place)) out += ` <span class="place">(${tied ? "T" : ""}${esc(place)}${ordinal(place)})</span>`;
   return out;
 }
 function ordinal(p) {
@@ -588,10 +599,10 @@ function popoverHTML(ride, adj, delayMin) {
   if (res) {
     resultsRows = `
       <tr><td class="results-head" colspan="2">Results</td></tr>
-      <tr><td>Dressage</td><td>${resCell(res.DressageScore, res.DressagePlace)}</td></tr>
-      <tr><td>Cross Country</td><td>${resCell(res.XCScore, res.XCPlace)}</td></tr>
-      <tr><td>Show Jumping</td><td>${resCell(res.SJScore, res.SJPlace)}</td></tr>
-      <tr><td>Overall</td><td>${resCell(res.FinalPoints, res.FinalPlace)}</td></tr>`;
+      <tr><td>Dressage</td><td>${resCell(res.DressageScore, res.DressagePlace, tiedAt(ride.division, "DressagePlace", parseInt(res.DressagePlace, 10)))}</td></tr>
+      <tr><td>Cross Country</td><td>${resCell(res.XCScore, res.XCPlace, tiedAt(ride.division, "XCPlace", parseInt(res.XCPlace, 10)))}</td></tr>
+      <tr><td>Show Jumping</td><td>${resCell(res.SJScore, res.SJPlace, tiedAt(ride.division, "SJPlace", parseInt(res.SJPlace, 10)))}</td></tr>
+      <tr><td>Overall</td><td>${resCell(res.FinalPoints, res.FinalPlace, tiedAt(ride.division, "FinalPlace", parseInt(res.FinalPlace, 10)))}</td></tr>`;
   } else {
     resultsRows = `<tr><td class="results-head" colspan="2">Results</td></tr>
       <tr><td colspan="2" class="pending">Not posted yet</td></tr>`;

@@ -125,6 +125,9 @@ top-level functions directly in a browser context) or a functional test
     ride is not today; phase abbreviated XC/SJ.
 35. Phase place field per phase: DressagePlace / XCPlace / SJPlace;
     overall from FinalPlace; ordinals correct (1st/2nd/3rd/4th, 11th-13th).
+    A place shared by 2+ combos in the division gets a "T" prefix (T4th)
+    in the done line and in the popover result cells; unique places get
+    no prefix.
 36. Previous-day rows: full brightness (no `.past` dim class) but gray
     done-line styling; today's done rows dim to 0.55 and tap/hover
     restores opacity (popover readable).

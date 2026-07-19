@@ -72,7 +72,8 @@ test('H31: done rides show ✓ phase place + currently/finished overall + next r
   const s = await openPage({ server, feed: doneFeed(), scoring: doneScoring(), now: NOON });
   try {
     const stillRiding = await rowInfo(s.page, 660);
-    assert.equal(stillRiding.countdown, '✓ XC 3rd · currently 2nd overall · next: SJ 3:00 PM');
+    assert.equal(stillRiding.countdown, '✓ XC T3rd · currently 2nd overall · next: SJ 3:00 PM',
+      'shared phase place gets a T prefix');
     // 661 is done riding but a competitor in DD still jumps at 3:00 PM, so
     // the division isn't final — "currently", never "finished", until the
     // last rider of the division's final phase has a posted score.
@@ -89,7 +90,7 @@ test('H32: scores pending / event complete wording', async () => {
   try {
     assert.equal((await rowInfo(s.page, 662)).countdown, '✓ scores pending · next: XC 4:00 PM');
     assert.equal((await rowInfo(s.page, 663)).countdown, '✓ scores pending · event complete');
-    assert.equal((await rowInfo(s.page, 664)).countdown, '✓ XC 3rd · event complete',
+    assert.equal((await rowInfo(s.page, 664)).countdown, '✓ XC T3rd · event complete',
       'phase place without overall still gets event complete');
   } finally { await s.context.close(); }
 });
