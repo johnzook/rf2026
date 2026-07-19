@@ -88,7 +88,7 @@
   .row.extra.next-up { background: var(--accent-soft); }
   .est { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
   .est b { font-weight: 650; color: var(--ink); }
-  .row.past .countdown { color: var(--past); font-weight: 400; }
+  .row.past .countdown, .countdown.done { color: var(--past); font-weight: 400; }
   .row.soon:not(.next-up) { border-color: var(--soon); background: var(--soon-soft); }
   .next-tag {
     position: absolute; top: -8px; left: 10px;
@@ -477,6 +477,20 @@ function outStatus(ride) {
   return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
 }
 
+// "done · 8th in phase · 7th overall" for a completed ride, from the
+// scoring join. Empty when nothing is posted yet.
+const PHASE_PLACE_FIELD = { "Dressage": "DressagePlace", "Cross Country": "XCPlace", "Show Jumping": "SJPlace" };
+function donePlaces(ride) {
+  const res = resultsIdx[`${ride.pinny}|${ride.division}`];
+  if (!res) return "";
+  const parts = [];
+  const pp = parseInt(res[PHASE_PLACE_FIELD[ride.phase]], 10);
+  if (pp) parts.push(`${pp}${ordinal(pp)} in phase`);
+  const op = parseInt(res.FinalPlace, 10);
+  if (op) parts.push(`${op}${ordinal(op)} overall`);
+  return parts.join(" · ");
+}
+
 // Automatic SJ slot estimate from live standings: order of go is reverse of
 // placing, so slot = block start + ~2 min per still-competing combo placed
 // below this one. Recomputed on every scoring poll, so it self-corrects as
@@ -610,17 +624,20 @@ function render() {
     // rows active until (estimate ?? time) + grace.
     const activeUntil = (r.est ? r.est.when : r.adj).getTime()
       + PAST_GRACE_MIN * 60_000;
-    const past = isToday && now.getTime() > activeUntil;
+    const isPastDay = day < todayKey;
+    const past = isPastDay || (isToday && now.getTime() > activeUntil);
     const out = r.extra ? null : outStatus(r);
     const isNext = isToday && !past && !out && !nextUpFound && (nextUpFound = true);
     const nextTag = minsUntil <= 0 ? "Now" : "Next up";
     const soon = isToday && !past && !out && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
-    if (out && !past) {
+    if (past) {
+      const pl = r.extra ? "" : donePlaces(r);
+      countdown = pl ? `done · ${pl}` : out || (r.extra ? "" : "done");
+    } else if (out) {
       countdown = out;
     } else if (isToday) {
-      countdown = past ? "done"
-        : minsUntil <= 0 ? "underway"
+      countdown = minsUntil <= 0 ? "underway"
         : minsUntil < 60 ? `in ${minsUntil} min`
         : `in ${Math.floor(minsUntil / 60)} h ${minsUntil % 60} min`;
     }
@@ -637,7 +654,7 @@ function render() {
         </div>`;
     }
     return `
-      <div class="row${isNext ? " next-up" : ""}${past ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}">
+      <div class="row${isNext ? " next-up" : ""}${past && !isPastDay ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}">
         ${isNext ? `<div class="next-tag">${nextTag}</div>` : ""}
         <div class="time">
           <div class="adj">${fmtClock(r.adj)}</div>
@@ -651,8 +668,8 @@ function render() {
           <div class="phase">${esc(r.phase)}</div>
           <div class="venue">${esc(r.venue)}${r.divisionShort ? " · " + esc(r.divisionShort) : ""}</div>
         </div>
-        ${countdown ? `<div class="countdown">${countdown}</div>` : ""}
-        ${r.est ? `<div class="est">est. slot <b>~${fmtClock(r.est.when)}</b> · ${esc(r.est.note)}</div>` : ""}
+        ${countdown ? `<div class="countdown${past ? " done" : ""}">${countdown}</div>` : ""}
+        ${r.est && !past ? `<div class="est">est. slot <b>~${fmtClock(r.est.when)}</b> · ${esc(r.est.note)}</div>` : ""}
         ${popoverHTML(r, r.adj, r.delayMin)}
       </div>`;
   });
