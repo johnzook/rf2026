@@ -6,7 +6,18 @@ implemented (see the `Resolved:` note and the referenced `R*:` tests).
 Genuine defects found in the original pass were fixed directly and are
 covered by `BUG-*` tests in `tests/robustness.test.js`.
 
-## 1. Deploy auto-reload throws away UI state
+## 1. ~~Deploy auto-reload throws away UI state~~ FIXED
+
+Resolved: `checkForNewDeploy` stashes `{at, selectedDay, scrollY}` in
+sessionStorage (`rf2026:reloadState`) immediately before `location.reload()`.
+On startup a fresh (<2 min) key restores the selected day before the first
+render, restores scroll at the first render of rows, and suppresses the
+one-time scroll-to-now landing; the key is consumed either way, and normal
+loads are unchanged. Pinned popovers are deliberately not restored across a
+reload (the deployed data may have changed). Covered by test `R1:`
+(TESTPLAN 50/60).
+
+### Original note
 
 **Today:** `checkForNewDeploy` calls `location.reload()` within a minute of
 any byte change to the page — while someone may be mid-scroll, on a
@@ -23,7 +34,16 @@ at once.
 and restore after reload; or defer the reload until the tab is hidden /
 idle; or swap in the new data without a full reload.
 
-## 2. Pinned popover closes on every poll (up to every 20 s)
+## 2. ~~Pinned popover closes on every poll (up to every 20 s)~~ FIXED
+
+Resolved: ride rows now carry a stable `data-key` (pinny|phase|dayKey);
+`render()` captures the pinned row's key before rebuilding `#list` and
+re-applies `.pinned` to the matching row afterwards. A row that no longer
+exists (rider removed, day switched) drops the pin silently; tap-to-toggle
+and pin-moving semantics are unchanged, and extras (no key) still can't
+pin. Covered by test `R2:` (TESTPLAN 39/61).
+
+### Original note
 
 **Today:** `render()` rebuilds `#list` via `innerHTML`, so a pinned
 popover's `.pinned` class is dropped on each event poll (20 s), scoring
@@ -122,7 +142,18 @@ it has started.
 **Direction:** scope `soon` to `0 < minsUntil <= 30`, or give underway
 rows their own treatment.
 
-## 7. No fetch timeout — hanging cell networks stall silently
+## 7. ~~No fetch timeout — hanging cell networks stall silently~~ FIXED
+
+Resolved: all three fetch sites (`fetchEventFeed`, `fetchScoring`,
+`checkForNewDeploy`) pass `AbortSignal.timeout(10_000)` — feature-detected,
+so browsers without it just skip the timeout — and each holds a per-function
+in-flight boolean so a new poll returns immediately while the previous
+request is pending. A timed-out event fetch surfaces the same "can't reach
+ShowConnect, retrying" note; the flags reset in `finally`, so an
+aborted/rejected fetch can never wedge polling. Covered by test `R7:`
+(TESTPLAN 59).
+
+### Original note
 
 **Today:** `fetch(EVENT_URL)` has no timeout/AbortController. On venue
 cell networks that accept the connection and then hang (common on
@@ -138,7 +169,15 @@ Piled-up sockets can also starve the browser's connection pool.
 **Direction:** `AbortSignal.timeout(10_000)` on all three fetch sites,
 plus an in-flight flag so a new poll never overlaps a hung one.
 
-## 8. Done-line "next:" times ignore venue delays
+## 8. ~~Done-line "next:" times ignore venue delays~~ FIXED
+
+Resolved: `nextRideInfo` now computes each candidate's effective time via
+`adjustedTime(o).adj` (override wins; else venue delay on `DELAY_DATE`) for
+both the still-in-the-future filter and the displayed time, so the "next:"
+line can never disagree with that ride's own row and a delay-pushed ride is
+never skipped as already past. Covered by test `R8:` (TESTPLAN 34/62).
+
+### Original note
 
 **Today:** `nextRideInfo` uses `override || when` — overrides yes, but
 `DELAYS` no (TESTPLAN 34 specifies exactly this). On a delay day the done
@@ -217,7 +256,20 @@ fix.
 **Direction:** `Object.create(null)` for the built indexes and an
 `Object.hasOwn`/`typeof === "number"` guard on the `DELAYS` lookup.
 
-## 12. Midnight-boundary behaviors
+## 12. ~~Midnight-boundary behaviors~~ FIXED (a + c; b intentionally kept)
+
+Resolved for (a) and (c): a row whose `activeUntil` is still in the future
+is no longer flipped to a previous-day row at 12:00 AM — the day-boundary
+check only wins once the grace window has expired (test `R12a:`,
+TESTPLAN 23/63); and the one-time scroll-to-now landing is consumed by the
+first feed-data-backed render whatever it shows, so a page first opened on
+a no-rides day (or showing another day) can never be yanked hours later
+when today first gains rows (test `R12c:`, TESTPLAN 50/64).
+Part (b) — the default (auto) day chip flipping to the new day at midnight
+— was reviewed and deliberately KEPT as-is: a user who wants to stay on a
+day can tap its chip, which pins it.
+
+### Original note
 
 **Today:** at event-local midnight, (a) a ride still inside its grace
 window (e.g. an 11:56 PM SJ block whose estimate crosses 12:00 AM — see

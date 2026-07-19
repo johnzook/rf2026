@@ -499,9 +499,13 @@ const OUT_WORDS = {
   E: "eliminated", IE: "eliminated", TE: "eliminated",
   R: "retired", MR: "retired", RF: "rider fall", W: "withdrawn", IW: "withdrawn",
 };
+// Guarded read of a plain map literal keyed by a feed string: a key like
+// "constructor" must miss (undefined), never resolve to an inherited
+// Object.prototype member. The maps themselves stay plain literals.
+const mapGet = (map, key) => Object.hasOwn(map, key) ? map[key] : undefined;
 function outStatus(ride) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
-  return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
+  return (res && mapGet(OUT_WORDS, (res.FinalPlace || "").trim())) || null;
 }
 
 // For a completed ride, the combo's next ride from NOW (not from this
@@ -509,7 +513,11 @@ function outStatus(ride) {
 // line says what's actually still coming.
 const PHASE_SHORT = { "Cross Country": "XC", "Show Jumping": "SJ" };
 function nextRideInfo(ride, now) {
-  const timeOf = o => o.override || o.when;
+  // Effective time, same rules as the rows themselves (override wins, else
+  // venue delay on DELAY_DATE) — so the advertised "next:" time can never
+  // disagree with that ride's own row, and a ride pushed into the future by
+  // a delay is not skipped as already past.
+  const timeOf = o => adjustedTime(o).adj;
   // Same combo = same pinny; while pinnies are unassigned (null) fall back
   // to rider+horse so two unnumbered combos are never conflated.
   const sameCombo = o => ride.pinny != null
@@ -526,7 +534,7 @@ function nextRideInfo(ride, now) {
     t.toLocaleDateString("en-US", { weekday: "short" }) + " ";
   // This string lands in innerHTML (the countdown line) — escape the phase,
   // the only feed-controlled part.
-  return `next: ${esc(PHASE_SHORT[best.phase] || best.phase)} ${day}${fmtClock(t)}`;
+  return `next: ${esc(mapGet(PHASE_SHORT, best.phase) || best.phase)} ${day}${fmtClock(t)}`;
 }
 
 // A posted phase score means this ride already happened — used to end the
@@ -535,7 +543,7 @@ function nextRideInfo(ride, now) {
 const PHASE_DONE_FIELD = { "Dressage": "DressageScore", "Cross Country": "XCScore", "Show Jumping": "SJScore" };
 function phaseResultPosted(ride) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
-  const field = PHASE_DONE_FIELD[ride.phase];
+  const field = mapGet(PHASE_DONE_FIELD, ride.phase);
   if (!res || !field) return false;
   return !isNaN(parseFloat(res[field]));
 }
@@ -548,7 +556,7 @@ function divisionComplete(divisionName) {
   const rows = scoringByDiv[divisionName] || [];
   if (!rows.length) return false; // unknown -> don't claim final
   const lastPhase = ((divMeta[divisionName] || {}).phaseOrder || "d-xc-sj").split("-").pop();
-  const field = PHASE_SCORE_FIELD[lastPhase] || "SJScore";
+  const field = mapGet(PHASE_SCORE_FIELD, lastPhase) || "SJScore";
   return rows
     .filter(s => !isNaN(parseInt(s.FinalPlace, 10)))
     .every(s => { const v = (s[field] || "").trim(); return v && v !== "--"; });
@@ -569,13 +577,13 @@ function tiedAt(divisionName, field, place) {
 function donePlaces(ride, isFinal) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   if (!res) return { phase: null, overall: null };
-  const pf = PHASE_PLACE_FIELD[ride.phase];
+  const pf = mapGet(PHASE_PLACE_FIELD, ride.phase);
   const pp = parseInt(res[pf], 10);
   const op = parseInt(res.FinalPlace, 10);
   const ppT = pp && tiedAt(ride.division, pf, pp) ? "T" : "";
   const opT = op && tiedAt(ride.division, "FinalPlace", op) ? "T" : "";
   return {
-    phase: pp ? `${PHASE_SHORT[ride.phase] || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
+    phase: pp ? `${mapGet(PHASE_SHORT, ride.phase) || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
     overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)} overall` : null,
   };
 }
@@ -710,10 +718,20 @@ function render() {
   dayRides.sort((a, b) => a.adj - b.adj);
 
   const list = document.getElementById("list");
+  // Rebuilding #list innerHTML would silently drop a pinned popover (polls
+  // re-render up to every 20 s): remember the pinned row's identity
+  // (pinny|phase|dayKey, its data-key) and re-apply the pin afterwards.
+  const pinnedEl = list.querySelector(".row.pinned");
+  const pinnedKey = pinnedEl ? pinnedEl.dataset.key : null;
   if (dayRides.length === 0) {
     list.innerHTML = `<div class="empty">${rides.length === 0
       ? "No scheduled rides yet for the followed riders."
       : "No rides on this day for the followed riders."}</div>`;
+    // This render consumed the one-shot landing too: if the page first
+    // loads on a day with no rides, the scroll-to-now must not fire
+    // hours/days later when today first gains rows. (Only once feed data
+    // exists — a scoring-first render must not eat the landing early.)
+    if (lastUpdatedMs !== null) initialScrollDone = true;
     return;
   }
 
@@ -731,7 +749,11 @@ function render() {
     // rows active until (estimate ?? time) + grace.
     const activeUntil = (r.est ? r.est.when : r.adj).getTime()
       + PAST_GRACE_MIN * 60_000;
-    const isPastDay = day < todayKey;
+    // A row whose active window spans event-local midnight (late SJ block,
+    // estimate past 12:00 AM) must not flip to a previous-day row the
+    // moment the date rolls over: the day-boundary check only wins once
+    // activeUntil has expired. Ordinary previous-day rows are unaffected.
+    const isPastDay = day < todayKey && now.getTime() > activeUntil;
     // Done when the grace window runs out — or as soon as the score posts
     // for a ride whose listed time has passed (never for future rides).
     const past = isPastDay || (isToday && (now.getTime() > activeUntil
@@ -783,7 +805,7 @@ function render() {
         </div>`;
     }
     return `
-      <div class="row${isNext ? " next-up" : ""}${past && !isPastDay ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}">
+      <div class="row${isNext ? " next-up" : ""}${past && !isPastDay ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}" data-key="${esc(`${r.pinny}|${r.phase}|${r.dayKey}`)}">
         ${isNext ? `<div class="next-tag">${nextTag}</div>` : ""}
         <div class="time">
           <div class="adj">${fmtClock(r.adj)}</div>
@@ -811,15 +833,34 @@ function render() {
   }
   list.innerHTML = rowsHTML.join("");
 
-  // Land on "now" once, at first render of today's list. Never afterwards —
-  // re-renders and data refreshes must not move the screen under the user;
-  // the floating button is the deliberate way back.
-  if (!initialScrollDone && isToday) {
-    const el = document.querySelector(".now-line");
-    if (el) {
-      el.scrollIntoView({ block: "center" });
-      initialScrollDone = true;
+  // Re-apply the pin captured above if its row still exists (same
+  // pinny|phase|dayKey); a row that vanished (rider removed, day switched)
+  // just drops the pin. Extras carry no data-key and can't pin.
+  if (pinnedKey) {
+    for (const rowEl of list.querySelectorAll(".row[data-key]")) {
+      if (rowEl.dataset.key === pinnedKey) { rowEl.classList.add("pinned"); break; }
     }
+  }
+
+  // Land on "now" once, only if the FIRST render with feed data shows
+  // today's list. Never afterwards — re-renders and data refreshes must
+  // not move the screen under the user; the floating button is the
+  // deliberate way back. Any data-backed render consumes the one-shot, so
+  // a page opened on a rest day (or showing another day) can't be yanked
+  // later when today's rows first appear. Renders before any feed data
+  // (a scoring response beating the event feed) leave the one-shot armed.
+  if (!initialScrollDone && lastUpdatedMs !== null) {
+    if (isToday) {
+      const el = document.querySelector(".now-line");
+      if (el) el.scrollIntoView({ block: "center" });
+    }
+    initialScrollDone = true;
+  }
+  // Deploy-reload handoff: put the scroll back where it was, once, at the
+  // first render that actually has rows to scroll through.
+  if (restoreScrollY !== null) {
+    window.scrollTo(0, restoreScrollY);
+    restoreScrollY = null;
   }
   updateNowBtn();
 
@@ -851,9 +892,25 @@ function render() {
 
 // ---- Polling (fail-soft: keep showing the last good data on errors) ----
 
+// Venue cell networks sometimes accept a connection and then hang: without
+// a timeout the fetch never settles, the retry note never shows, and every
+// poll tick would stack another hung request. So every fetch gets a 10 s
+// abort (feature-detected — older browsers just skip the timeout) and a
+// per-function in-flight flag so a new poll returns immediately while the
+// previous one is still pending. The flags reset in `finally`, so a
+// rejected/aborted/timed-out fetch can never wedge polling permanently.
+const FETCH_TIMEOUT_MS = 10_000;
+function fetchTimeoutSignal() {
+  return (typeof AbortSignal !== "undefined" && AbortSignal.timeout)
+    ? AbortSignal.timeout(FETCH_TIMEOUT_MS) : undefined;
+}
+
+let eventFetchInFlight = false;
 async function fetchEventFeed() {
+  if (eventFetchInFlight) return;
+  eventFetchInFlight = true;
   try {
-    const resp = await fetch(EVENT_URL);
+    const resp = await fetch(EVENT_URL, { signal: fetchTimeoutSignal() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const feed = await resp.json();
     lastFeed = feed;
@@ -863,21 +920,50 @@ async function fetchEventFeed() {
     cachePut(CACHE_EVENT, feed);
     document.getElementById("fetch-err").textContent = "";
   } catch (e) {
+    // Timeouts land here too: a hung network shows the same retry note.
     document.getElementById("fetch-err").textContent = "· can't reach ShowConnect, retrying";
+  } finally {
+    eventFetchInFlight = false;
   }
   render();
 }
 
+let scoringFetchInFlight = false;
 async function fetchScoring() {
+  if (scoringFetchInFlight) return;
+  scoringFetchInFlight = true;
   try {
-    const resp = await fetch(SCORING_URL);
+    const resp = await fetch(SCORING_URL, { signal: fetchTimeoutSignal() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const scoring = await resp.json();
     resultsIdx = buildResultsIndex(scoring);
     cachePut(CACHE_SCORING, scoring);
     render();
   } catch (e) { /* results are a nicety; ignore failures */ }
+  finally { scoringFetchInFlight = false; }
 }
+
+// State handed over by the deploy auto-reload (see checkForNewDeploy):
+// restore the selected day before the first render and the scroll offset at
+// the first render of rows, and suppress the one-time scroll-to-now landing
+// so the reload puts the user back exactly where they were. Only a fresh
+// stamp counts — stale state (>2 min, e.g. a crashed reload from earlier)
+// is discarded and the load behaves like a normal one. The key is consumed
+// (removed) either way; normal loads without the key are unaffected.
+const RELOAD_STATE_KEY = "rf2026:reloadState";
+let restoreScrollY = null;
+try {
+  const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
+  if (raw) {
+    sessionStorage.removeItem(RELOAD_STATE_KEY);
+    const st = JSON.parse(raw);
+    if (st && typeof st.at === "number" && Date.now() - st.at < 2 * 60_000) {
+      if (st.selectedDay) selectedDay = st.selectedDay;
+      if (typeof st.scrollY === "number") restoreScrollY = st.scrollY;
+      initialScrollDone = true; // no scroll-to-now landing on a state-restoring reload
+    }
+  }
+} catch (e) { /* blocked/corrupt storage — behave like a normal load */ }
 
 // Hydrate from cache so the page is useful immediately, even fully offline.
 // Guarded: a cache blob of the wrong shape (older app version, corrupted
@@ -903,15 +989,28 @@ try {
 // delay/follow-list edits reach open phones within a minute of deploy —
 // no separate signal file to maintain, any commit to the page is the signal.
 let deployBaseline = null;
+let deployFetchInFlight = false;
 async function checkForNewDeploy() {
   if (!location.protocol.startsWith("http")) return; // no-op for file://
+  if (deployFetchInFlight) return;
+  deployFetchInFlight = true;
   try {
-    const resp = await fetch(location.href, { cache: "no-store" });
+    const resp = await fetch(location.href, { cache: "no-store", signal: fetchTimeoutSignal() });
     if (!resp.ok) return;
     const text = await resp.text();
     if (deployBaseline === null) deployBaseline = text;
-    else if (text !== deployBaseline) location.reload();
+    else if (text !== deployBaseline) {
+      // Hand the UI state to the post-reload page so a pushed config edit
+      // doesn't yank the user back to the top of "today" (REVIEW #1).
+      try {
+        sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({
+          at: Date.now(), selectedDay, scrollY: window.scrollY,
+        }));
+      } catch (err) { /* blocked storage — reload without state */ }
+      location.reload();
+    }
   } catch (e) { /* offline blip; try again next tick */ }
+  finally { deployFetchInFlight = false; }
 }
 
 // ---- "My riders" picker sheet ----

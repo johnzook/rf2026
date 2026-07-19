@@ -92,6 +92,10 @@ top-level functions directly in a browser context) or a functional test
     phase score is posted numerically in the scoring feed, provided the
     listed time has passed (a posted score never marks a future ride done;
     out codes E/R/W... in the score field don't count as posted).
+    Midnight nuance: a row whose `activeUntil` extends past event-local
+    midnight is NOT flipped to a previous-day row at 12:00 AM — the
+    day-boundary check only wins once `activeUntil` has expired; ordinary
+    previous-day rows (grace long expired) are unaffected. (Test `R12a:`.)
 24. Countdown text: `in N min` (<60), `in H h M min` (>=60), `underway`
     when listed time has passed but not activeUntil.
 25. "Next up" tag on the first non-past, non-out row; label reads
@@ -128,9 +132,13 @@ top-level functions directly in a browser context) or a functional test
 33. Out on this ride with no places: bare status word (no ✓). Out later
     with places on this ride: `✓ Dressage 14th · withdrawn`.
 34. `next:` points at the combo's next ride from NOW (not from the row's
-    slot — skips intermediate phases that already ran); uses
-    override-adjusted times; weekday label included only when the next
-    ride is not today; phase abbreviated XC/SJ.
+    slot — skips intermediate phases that already ran); uses each
+    candidate's effective time per `adjustedTime` (override wins, else
+    venue delay when the ride's day is `DELAY_DATE`) for BOTH the
+    still-in-the-future filter and the displayed time — so a delay-pushed
+    ride is never skipped as already past, and the advertised time always
+    matches that ride's own row; weekday label included only when the next
+    ride is not today; phase abbreviated XC/SJ. (Test `R8:`.)
 35. Phase place field per phase: DressagePlace / XCPlace / SJPlace;
     overall from FinalPlace; ordinals correct (1st/2nd/3rd/4th, 11th-13th).
     A place shared by 2+ combos in the division gets a "T" prefix (T4th)
@@ -151,7 +159,12 @@ top-level functions directly in a browser context) or a functional test
     row → "Not posted yet".
 39. Tap pins exactly one popover (tapping another row moves the pin;
     tapping the pinned row unpins); clicks inside the popover don't
-    unpin.
+    unpin. A pinned popover survives re-render: ride rows carry a stable
+    `data-key` (pinny|phase|dayKey), the pinned row's key is captured
+    before `#list` is rebuilt and the pin re-applied to the matching row
+    afterwards; if the row no longer exists (rider removed, day switched)
+    the pin is dropped silently. Extras carry no key and can't pin.
+    (Test `R2:`.)
 
 ## J. Persistence & network
 
@@ -206,7 +219,12 @@ top-level functions directly in a browser context) or a functional test
 
 50. First render of today's list scrolls the now-line to viewport center,
     exactly once per page load; re-renders and day switches never move
-    scroll.
+    scroll. The one-shot is consumed by the FIRST render backed by feed
+    data whatever it shows (empty day, another day's rows), so the landing
+    can never fire hours later and yank the screen; renders before any
+    event-feed data (a scoring response arriving first) leave it armed.
+    A deploy-triggered reload restores the previous day + scroll instead
+    of landing on now (item 60). (Tests `M50`, `R12c:`, `R1:`.)
 51. Floating "now" button hidden while the marker is on-screen or when
     viewing another day; appears with ↑/↓ direction when off-screen;
     click scrolls the marker to ~25% down the viewport.
@@ -219,7 +237,7 @@ top-level functions directly in a browser context) or a functional test
 54. `isoDay`, `fmtClock` (12-hour, 12 AM/PM correctness), `ordinal`
     helpers behave per examples above.
 
-## O. July 2026 UX/robustness fixes (REVIEW items 3, 4, 6, 9, 10, 11)
+## O. July 2026 UX/robustness fixes (REVIEW items 1–4, 6–12)
 
 55. Redundant cache writes are skipped: `cachePut` serializes the payload
     once, remembers the last-written string per key in a module variable,
@@ -250,3 +268,48 @@ top-level functions directly in a browser context) or a functional test
     yields safe defaults (0 delay, normal join) instead of inherited
     functions, and a typo'd non-number delay value shifts nothing.
     (Test `R11:`.)
+
+59. Fetch timeout + in-flight guard: `fetchEventFeed`, `fetchScoring`,
+    and `checkForNewDeploy` each pass `AbortSignal.timeout(10_000)` to
+    their fetch (feature-detected — browsers without `AbortSignal.timeout`
+    simply skip the timeout, no polyfill) and hold a per-function
+    in-flight boolean, so a poll tick that fires while the previous
+    request is still pending returns immediately instead of stacking
+    another request. A timed-out event fetch surfaces the same
+    "can't reach ShowConnect, retrying" note as any other failure. The
+    flag is reset in a `finally` block, so a rejected/aborted/timed-out
+    fetch can never wedge polling — the next poll fetches again.
+    (Test `R7:`.)
+
+60. Deploy-reload state handoff: immediately before the auto-reload,
+    `checkForNewDeploy` writes `{at, selectedDay, scrollY}` to
+    sessionStorage key `rf2026:reloadState`. On startup, a key younger
+    than 2 minutes restores `selectedDay` before the first render,
+    restores the scroll offset at the first render of rows, and sets
+    `initialScrollDone = true` (no scroll-to-now landing). The key is
+    consumed (removed) whether fresh or stale; stale or absent state
+    behaves like a normal load, including today's now-landing. Pinned
+    popovers are NOT restored across reload (data may have changed).
+    (Test `R1:`; item 50 updated.)
+
+61. Pinned-popover survival across re-render, per item 39's data-key
+    rule. (Test `R2:`.)
+
+62. Delay-aware done-line "next:", per item 34's `adjustedTime` rule.
+    (Test `R8:`.)
+
+63. Grace windows span midnight, per item 23's midnight nuance.
+    Deliberately NOT changed: the default (auto) day chip still flips to
+    the new day at midnight (REVIEW 12b). (Test `R12a:`.)
+
+64. Stale one-shot landing, per item 50: the first feed-data-backed
+    render consumes the scroll-to-now one-shot even when it shows an
+    empty day or another day's rows. (Test `R12c:`.)
+
+65. Guarded feed-string map reads: `OUT_WORDS`, `PHASE_SHORT`,
+    `PHASE_PLACE_FIELD`, `PHASE_DONE_FIELD`, and `PHASE_SCORE_FIELD`
+    stay plain literals but are read via an `Object.hasOwn` helper
+    (`mapGet`), so a `FinalPlace` or phase named
+    `constructor`/`toString`/`__proto__` misses the map — a FinalPlace of
+    "constructor" yields not-out, and the done line never stringifies an
+    inherited function. (Test `R11b:`; extends item 58.)

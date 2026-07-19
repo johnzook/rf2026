@@ -167,6 +167,118 @@ test('J43: fetch failures never clear rendered data; scoring failures are silent
   } finally { await s.context.close(); }
 });
 
+test('R7: fetch timeout + in-flight guard — hung requests never pile up, the flag always resets, retry note shows', async () => {
+  const s = await openPage({ server, feed: simpleFeed(), scoring: simpleScoring(), now: NOON });
+  try {
+    // From here on the event endpoint hangs: request accepted, never answered
+    // (the saturated-LTE failure mode). Spy on every real fetch() call.
+    await s.context.route('**/api/sc/event/1187', () => { /* never fulfill */ });
+    await s.page.evaluate(() => {
+      window.__fetches = 0;
+      const orig = window.fetch;
+      window.fetch = (...a) => { window.__fetches++; return orig(...a); };
+    });
+
+    // Three poll ticks while the first request hangs: exactly one real fetch.
+    const piled = await s.page.evaluate(() => {
+      window.__first = fetchEventFeed(); // settles only via the 10 s abort
+      fetchEventFeed();
+      fetchEventFeed();
+      return window.__fetches;
+    });
+    assert.equal(piled, 1, 'in-flight guard prevents pile-up');
+
+    // AbortSignal.timeout(10_000) fires on real timers: the promise settles
+    // (no unhandled rejection) and the SAME retry note appears.
+    await s.page.evaluate(() => window.__first);
+    assert.equal(await s.page.$eval('#fetch-err', el => el.textContent),
+      '· can\'t reach ShowConnect, retrying', 'timeout surfaces the retry note');
+    assert.ok(await rowInfo(s.page, 720), 'stale rows retained through the timeout');
+
+    // The finally block reset the flag: the NEXT poll really fetches again
+    // and recovers once the endpoint answers.
+    await s.context.route('**/api/sc/event/1187', r => r.fulfill({
+      contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify(simpleFeed()),
+    }));
+    await s.page.evaluate(() => fetchEventFeed());
+    assert.equal(await s.page.evaluate(() => window.__fetches), 2,
+      'aborted fetch did not wedge polling — next poll fetched again');
+    assert.equal(await s.page.$eval('#fetch-err', el => el.textContent), '', 'recovery clears the note');
+
+    // fetchScoring and checkForNewDeploy carry the same guard: two calls
+    // each against hanging endpoints -> one request each.
+    await s.context.route('**/api/sc/event/1187/scoringLive', () => { /* hang */ });
+    await s.context.route(s.page.url(), () => { /* hang */ });
+    const delta = await s.page.evaluate(() => {
+      const before = window.__fetches;
+      fetchScoring(); fetchScoring();
+      checkForNewDeploy(); checkForNewDeploy();
+      return window.__fetches - before;
+    });
+    assert.equal(delta, 2, 'one in-flight request per endpoint');
+    assert.equal(s.page.__pageError, undefined, 'no unhandled rejection anywhere');
+  } finally { await s.context.close(); }
+});
+
+test('R1: deploy reload restores day + scroll and suppresses the landing; stale state falls back to a normal load', async () => {
+  // Tall today list (so the now-landing visibly scrolls) plus a Friday list
+  // tall enough to scroll to 250px.
+  const names = Object.values(F.FOLLOWED);
+  const entries = [];
+  for (let i = 0; i < 30; i++) {
+    entries.push(F.entry({ pinny: 730 + i, rider: names[i % names.length], details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 8 + Math.floor(i / 3), (i % 3) * 20) })] }));
+  }
+  for (let i = 0; i < 20; i++) {
+    entries.push(F.entry({ pinny: 770 + i, rider: names[i % names.length], details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R1', time: F.rideTimeStr(2026, 7, 17, 9 + Math.floor(i / 3), (i % 3) * 20) })] }));
+  }
+  const s = await openPage({ server, feed: F.feed(entries), now: NOON });
+  try {
+    // Normal load (no reload-state key): today's now-landing still happens.
+    assert.ok(await s.page.evaluate(() => window.scrollY) > 0, 'normal load lands on now');
+
+    // User picks Friday and scrolls; then a deploy lands and the page
+    // reloads itself, stashing day + scroll in sessionStorage.
+    await s.page.click('#days .day-chip:first-child');
+    await s.page.evaluate(() => window.scrollTo(0, 250));
+    server.setPage(INDEX_HTML.replace('</body>', '<!-- deploy-r1 --></body>'));
+    await Promise.all([
+      s.page.waitForNavigation({ waitUntil: 'load' }),
+      s.page.evaluate(() => checkForNewDeploy()).catch(() => { /* context destroyed by reload */ }),
+    ]);
+    await s.page.waitForFunction(() => lastUpdatedMs !== null);
+    const r = await s.page.evaluate(() => ({
+      day: selectedDay,
+      chip: document.querySelector('#days .day-chip.active').textContent,
+      scrollY: window.scrollY,
+      keyLeft: sessionStorage.getItem('rf2026:reloadState'),
+      landingDone: initialScrollDone,
+    }));
+    assert.equal(r.day, '2026-07-17', 'selected day restored across the reload');
+    assert.equal(r.chip, 'Fri, Jul 17');
+    assert.equal(r.scrollY, 250, 'scroll offset restored, not re-centered on now');
+    assert.equal(r.keyLeft, null, 'reload-state key consumed');
+    assert.equal(r.landingDone, true, 'one-time now-landing suppressed');
+
+    // A stale key (>2 min old) is discarded: the load behaves normally
+    // (auto day = today, now-landing fires) and the key is still cleared.
+    await s.page.evaluate(() => sessionStorage.setItem('rf2026:reloadState',
+      JSON.stringify({ at: Date.now() - 3 * 60_000, selectedDay: '2026-07-17', scrollY: 250 })));
+    await s.page.reload({ waitUntil: 'load' });
+    await s.page.waitForFunction(() => lastUpdatedMs !== null);
+    const r2 = await s.page.evaluate(() => ({
+      day: selectedDay,
+      chip: document.querySelector('#days .day-chip.active').textContent,
+      keyLeft: sessionStorage.getItem('rf2026:reloadState'),
+    }));
+    assert.equal(r2.day, null, 'stale day not restored');
+    assert.equal(r2.chip, 'Today');
+    assert.equal(r2.keyLeft, null, 'stale key still cleared');
+  } finally { server.reset(); await s.context.close(); }
+});
+
 test('J44: deploy watcher — same bytes: no reload; changed bytes: reload; file:// is a no-op', async () => {
   const s = await openPage({ server, feed: simpleFeed(), scoring: simpleScoring(), now: NOON });
   try {

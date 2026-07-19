@@ -158,6 +158,41 @@ test('R6: soon applies only before the start (0 < minsUntil <= 30) — underway 
   } finally { await s.context.close(); }
 });
 
+test('R12a: a grace window spanning midnight keeps the row active past 12:00 AM; expired previous-day rows unchanged', async () => {
+  const feed = F.feed([
+    // 23:56 ride: grace runs to 00:06 the next day.
+    F.entry({ pinny: 646, rider: F.FOLLOWED.zook, details: [
+      F.ridingDetail({ phase: 'Show Jumping', venue: 'SJR1', time: F.rideTimeStr(2026, 7, 18, 23, 56) })] }),
+    // 20:00 ride: grace long expired — an ordinary previous-day row.
+    F.entry({ pinny: 647, rider: F.FOLLOWED.aulita, details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 20, 0) })] }),
+  ]);
+  // 00:02 Sun, viewing Saturday (the only day with rides, so it is also the
+  // default view): dayKey < todayKey, but 646's activeUntil (00:06) is
+  // still in the future.
+  const s = await openPage({ server, feed, now: denverMs(2026, 7, 19, 0, 2) });
+  try {
+    await s.page.evaluate(() => { selectedDay = '2026-07-18'; render(); });
+    const active = await rowInfo(s.page, 646);
+    assert.equal(active.countdown, null,
+      'row inside its cross-midnight grace window shows no premature done line');
+    assert.ok(!active.classes.includes('past'), 'not flipped to a past row at 12:00 AM');
+
+    const expired = await rowInfo(s.page, 647);
+    assert.equal(expired.countdown, '✓ scores pending · event complete',
+      'ordinary previous-day row keeps its done line');
+    assert.ok(expired.countdownClasses.includes('done'));
+
+    // Once the grace window runs out, the row becomes a normal previous-day
+    // done row (no dimming, gray done line — same as before the fix).
+    await s.page.evaluate(ms => { window.__setNow(ms); render(); }, denverMs(2026, 7, 19, 0, 7));
+    const after = await rowInfo(s.page, 646);
+    assert.equal(after.countdown, '✓ scores pending · event complete');
+    assert.ok(after.countdownClasses.includes('done'));
+    assert.ok(!after.classes.includes('past'), 'previous-day rows are never dimmed');
+  } finally { await s.context.close(); }
+});
+
 test('F27: now-line placed by adjusted time, today only, labeled with the clock', async () => {
   const s = await openPage({ server, feed: dayFeed(), now: NOON });
   try {

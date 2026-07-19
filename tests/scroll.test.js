@@ -3,7 +3,7 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { startServer, openPage, closeBrowser, denverMs } = require('./helpers');
+const { startServer, openPage, closeBrowser, denverMs, INDEX_HTML } = require('./helpers');
 const F = require('./fixtures/builders');
 
 let server;
@@ -110,6 +110,52 @@ test('R10: active day chip is auto-scrolled into view in the chip row; page scro
     assert.equal(r.chipVisible, true, 'row scrolled back for a left-edge chip');
     assert.equal(r.scrollLeft, 0);
     assert.equal(r.scrollY, pageY, 'chip-row scrolling leaves the page scroll alone');
+  } finally { await s.context.close(); }
+});
+
+test('R12c: the first data render consumes the one-shot landing — a no-rides or other-day first view can never yank the screen later', async () => {
+  const CORS = { 'access-control-allow-origin': '*' };
+  const fulfill = body => r => r.fulfill({
+    contentType: 'application/json', headers: CORS, body: JSON.stringify(body) });
+
+  // (a) First render is the true empty state. Serve a page variant with no
+  // EXTRAS — the baked course-walk entry would otherwise give July 17 a
+  // chip and a row.
+  server.setPage(INDEX_HTML.replace(/const EXTRAS = \[[\s\S]*?\n\];/, 'const EXTRAS = [];'));
+  let s = await openPage({ server, feed: F.feed([]), now: NOON });
+  try {
+    assert.equal(await s.page.$eval('#list .empty', el => el.textContent),
+      'No scheduled rides yet for the followed riders.');
+    assert.equal(await s.page.evaluate(() => initialScrollDone), true,
+      'empty first render consumes the one-shot landing');
+
+    // Today's rides appear on a later poll: rows render, screen stays put.
+    await s.context.route('**/api/sc/event/1187', fulfill(longFeed()));
+    await s.page.evaluate(() => fetchEventFeed());
+    assert.ok(await s.page.$$eval('#list .row', els => els.length) > 10, 'rows now shown');
+    assert.equal(await s.page.evaluate(() => window.scrollY), 0, 'no stale auto-scroll yank');
+  } finally { server.reset(); await s.context.close(); }
+
+  // (b) First render shows ANOTHER day's rows (rides only tomorrow): the
+  // one-shot is consumed there too.
+  const names = Object.values(F.FOLLOWED);
+  const tomorrowOnly = F.feed(Array.from({ length: 12 }, (_, i) =>
+    F.entry({ pinny: 820 + i, rider: names[i % names.length], details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 19, 9 + i, 0) })] })));
+  s = await openPage({ server, feed: tomorrowOnly, now: NOON });
+  try {
+    assert.equal(await s.page.evaluate(() =>
+      document.querySelector('#days .day-chip.active').textContent), 'Sun, Jul 19');
+    assert.equal(await s.page.evaluate(() => initialScrollDone), true,
+      'non-today first render consumes the one-shot too');
+
+    // Today gains rides later: auto day flips to Today, still no yank.
+    await s.context.route('**/api/sc/event/1187', fulfill(longFeed()));
+    await s.page.evaluate(() => fetchEventFeed());
+    assert.equal(await s.page.evaluate(() =>
+      document.querySelector('#days .day-chip.active').textContent), 'Today');
+    assert.equal(await s.page.evaluate(() => window.scrollY), 0,
+      'landing never fires after the first data render');
   } finally { await s.context.close(); }
 });
 

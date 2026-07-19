@@ -186,6 +186,68 @@ test('R11: venues/divisions named like Object.prototype members get safe default
   } finally { await s.context.close(); }
 });
 
+// Wave-2 extension of R11: the remaining plain-literal maps keyed by feed
+// strings (OUT_WORDS, PHASE_SHORT, PHASE_PLACE_FIELD, PHASE_DONE_FIELD,
+// PHASE_SCORE_FIELD) are read through an Object.hasOwn guard. A FinalPlace
+// or phase literally named "constructor" must miss the map — never resolve
+// to an inherited function (which used to render as "function Object()..."
+// in the out status and done line).
+test('R11b: FinalPlace/phase strings named like Object.prototype members miss the guarded maps', async () => {
+  const feed = F.feed([
+    // Past + future ride in a phase literally named "constructor".
+    F.entry({ pinny: 893, rider: F.FOLLOWED.zook, division: 'DivC', details: [
+      F.ridingDetail({ phase: 'constructor', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 9, 0) }),
+      F.ridingDetail({ phase: 'constructor', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 15, 0) }),
+    ] }),
+  ]);
+  const scoring = F.scoring({
+    divisions: [F.division({ id: 62, name: 'DivC', phaseOrder: 'd-xc-constructor' })],
+    rows: [F.scoringRow({ pinny: 893, divisionId: 62, finalPlace: 'constructor' })],
+  });
+  const s = await openPage({ server, feed, scoring, now: NOON });
+  try {
+    assert.equal(s.page.__pageError, undefined, 'no crash on hostile phase/place strings');
+
+    // FinalPlace "constructor" is NOT an out code: the future ride counts
+    // down normally, and the past ride gets a done line whose "next:" shows
+    // the phase name literally (no inherited function stringified into it).
+    const probeRow = i => s.page.evaluate(i => {
+      const rows = [...document.querySelectorAll('#list .row')];
+      const el = rows[i];
+      return {
+        classes: [...el.classList],
+        countdown: el.querySelector('.countdown').textContent.replace(/\s+/g, ' ').trim(),
+      };
+    }, i);
+    const past = await probeRow(0);
+    assert.ok(!past.classes.includes('out'), 'not treated as out');
+    assert.equal(past.countdown, '✓ scores pending · next: constructor 3:00 PM');
+    const future = await probeRow(1);
+    assert.ok(!future.classes.includes('out'));
+    assert.equal(future.countdown, 'in 3 h 0 min', 'FinalPlace "constructor" yields not-out');
+
+    // Unit probes across every guarded map.
+    const r = await s.page.evaluate(() => {
+      const ride = { pinny: 893, division: 'DivC', phase: 'constructor' };
+      return {
+        out: outStatus(ride),
+        posted: phaseResultPosted(ride),
+        places: donePlaces(ride, false),
+        divComplete: typeof divisionComplete('DivC'),
+        outToString: (() => {
+          resultsIdx['894|DivC'] = { FinalPlace: 'toString' };
+          return outStatus({ pinny: 894, division: 'DivC' });
+        })(),
+      };
+    });
+    assert.equal(r.out, null, 'OUT_WORDS["constructor"] does not resolve to Object');
+    assert.equal(r.outToString, null, 'OUT_WORDS["toString"] misses too');
+    assert.equal(r.posted, false, 'PHASE_DONE_FIELD miss -> not posted');
+    assert.deepEqual(r.places, { phase: null, overall: null }, 'PHASE_PLACE_FIELD/PHASE_SHORT misses');
+    assert.equal(r.divComplete, 'boolean', 'PHASE_SCORE_FIELD miss falls back without throwing');
+  } finally { await s.context.close(); }
+});
+
 // Cache hydration ran unguarded at top level: a cached payload of the wrong
 // shape (older app version, corrupted storage) threw before the fetch calls
 // and event listeners were installed, leaving the page dead on "Loading…"
