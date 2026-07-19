@@ -321,7 +321,10 @@ for (const o of ESTIMATES) {
 const MY_RIDERS_KEY = "rf2026:myRiders";
 const HIDDEN_RIDERS_KEY = "rf2026:hiddenRiders";
 function getStoredList(key) {
-  try { return JSON.parse(localStorage.getItem(key)) || []; } catch (e) { return []; }
+  // Array.isArray guard: valid-but-wrong-shape JSON (e.g. written by another
+  // tool on this origin) must degrade to the baked list, not crash callers
+  // that spread/iterate the result.
+  try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; } catch (e) { return []; }
 }
 function setStoredList(key, list) {
   try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) { /* blocked */ }
@@ -483,16 +486,23 @@ function outStatus(ride) {
 const PHASE_SHORT = { "Cross Country": "XC", "Show Jumping": "SJ" };
 function nextRideInfo(ride, now) {
   const timeOf = o => o.override || o.when;
+  // Same combo = same pinny; while pinnies are unassigned (null) fall back
+  // to rider+horse so two unnumbered combos are never conflated.
+  const sameCombo = o => ride.pinny != null
+    ? o.pinny === ride.pinny
+    : o.pinny == null && o.rider === ride.rider && o.horse === ride.horse;
   let best = null;
   for (const o of rides) {
-    if (o.pinny !== ride.pinny || timeOf(o) <= now) continue;
+    if (!sameCombo(o) || timeOf(o) <= now) continue;
     if (!best || timeOf(o) < timeOf(best)) best = o;
   }
   if (!best) return null;
   const t = timeOf(best);
   const day = isoDay(t) === isoDay(now) ? "" :
     t.toLocaleDateString("en-US", { weekday: "short" }) + " ";
-  return `next: ${PHASE_SHORT[best.phase] || best.phase} ${day}${fmtClock(t)}`;
+  // This string lands in innerHTML (the countdown line) — escape the phase,
+  // the only feed-controlled part.
+  return `next: ${esc(PHASE_SHORT[best.phase] || best.phase)} ${day}${fmtClock(t)}`;
 }
 
 // Places for a completed ride, from the scoring join. The phase label
@@ -575,7 +585,7 @@ function popoverHTML(ride, adj, delayMin) {
   return `
     <div class="pop">
       <h3>${esc(ride.rider)}</h3>
-      <div class="pop-sub">${esc(ride.horse)} · #${esc(ride.pinny)}</div>
+      <div class="pop-sub">${esc(ride.horse)}${ride.pinny != null ? ` · #${esc(ride.pinny)}` : ""}</div>
       <table>
         <tr><td>Division</td><td>${esc(ride.division)}</td></tr>
         <tr><td>${esc(ride.phase)}</td><td>${timeRow} · ${esc(ride.venue)}</td></tr>
@@ -782,7 +792,10 @@ async function fetchScoring() {
 }
 
 // Hydrate from cache so the page is useful immediately, even fully offline.
-{
+// Guarded: a cache blob of the wrong shape (older app version, corrupted
+// storage) must never throw here — an uncaught top-level error would stop
+// the script before the fetch calls and listeners below ever run.
+try {
   const ev = cacheGet(CACHE_EVENT);
   if (ev && ev.value) {
     lastFeed = ev.value;
@@ -793,6 +806,8 @@ async function fetchScoring() {
   const sc = cacheGet(CACHE_SCORING);
   if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
   if (rides.length) render();
+} catch (e) {
+  lastFeed = null; rides = []; resultsIdx = {}; lastUpdatedMs = null;
 }
 
 // ---- Auto-reload on redeploy ----
