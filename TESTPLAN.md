@@ -85,7 +85,10 @@ top-level functions directly in a browser context) or a functional test
 ## F. Row lifecycle (today)
 
 23. `activeUntil` = (estimate time if present, else adjusted time) +
-    10 min grace; row is `past` only after that.
+    10 min grace; row is `past` only after that — OR as soon as the ride's
+    phase score is posted numerically in the scoring feed, provided the
+    listed time has passed (a posted score never marks a future ride done;
+    out codes E/R/W... in the score field don't count as posted).
 24. Countdown text: `in N min` (<60), `in H h M min` (>=60), `underway`
     when listed time has passed but not activeUntil.
 25. "Next up" tag on the first non-past, non-out row; label reads
