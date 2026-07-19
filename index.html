@@ -494,19 +494,19 @@ function nextRideInfo(ride) {
   return `next: ${PHASE_SHORT[best.phase] || best.phase} ${day}${fmtClock(t)}`;
 }
 
-// "XC 9th · 9th overall" for a completed ride, from the scoring join —
-// the phase label binds the place to this specific ride. Empty when
-// nothing is posted yet.
+// Places for a completed ride, from the scoring join. The phase label
+// binds the place to this specific ride; the overall wording says whether
+// the combo is still competing ("currently") or finished ("finished").
 const PHASE_PLACE_FIELD = { "Dressage": "DressagePlace", "Cross Country": "XCPlace", "Show Jumping": "SJPlace" };
-function donePlaces(ride) {
+function donePlaces(ride, isFinal) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
-  if (!res) return "";
-  const parts = [];
+  if (!res) return { phase: null, overall: null };
   const pp = parseInt(res[PHASE_PLACE_FIELD[ride.phase]], 10);
-  if (pp) parts.push(`${PHASE_SHORT[ride.phase] || ride.phase} ${pp}${ordinal(pp)}`);
   const op = parseInt(res.FinalPlace, 10);
-  if (op) parts.push(`${op}${ordinal(op)} overall`);
-  return parts.join(" · ");
+  return {
+    phase: pp ? `${PHASE_SHORT[ride.phase] || ride.phase} ${pp}${ordinal(pp)}` : null,
+    overall: op ? `${isFinal ? "finished" : "currently"} ${op}${ordinal(op)} overall` : null,
+  };
 }
 
 // Automatic SJ slot estimate from live standings: order of go is reverse of
@@ -653,11 +653,22 @@ function render() {
       if (r.extra) {
         countdown = "";
       } else {
-        const pl = donePlaces(r);
-        // ✓ marks the ride as completed; then its result (or pending),
-        // then the ride status if out, else where this combo rides next.
-        const suffix = out || nextRideInfo(r) || "event complete";
-        countdown = pl ? `✓ ${pl} · ${suffix}` : out || `✓ scores pending · ${suffix}`;
+        // ✓ marks the ride completed; then this ride's place, the combo's
+        // standing (worded "currently"/"finished"), then out status or the
+        // next ride when there is one.
+        const nxt = out ? null : nextRideInfo(r);
+        const p = donePlaces(r, !out && !nxt);
+        const bits = [p.phase, p.overall].filter(Boolean);
+        if (out) {
+          // e.g. "✓ Dressage 14th · withdrawn", or just "eliminated" when
+          // this is the ride where it happened (no result to check off).
+          countdown = bits.length ? `✓ ${bits.join(" · ")} · ${out}` : out;
+        } else {
+          if (!bits.length) bits.push("scores pending");
+          if (nxt) bits.push(nxt);
+          else if (!p.overall) bits.push("event complete");
+          countdown = "✓ " + bits.join(" · ");
+        }
       }
     } else if (out) {
       countdown = out;
