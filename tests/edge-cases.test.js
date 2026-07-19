@@ -51,6 +51,9 @@ test('A-edge: empty EntryList and empty ScoringList render the empty state, no c
   const s = await openPage({ server, feed: { EntryList: [] }, scoring: {}, now: NOON });
   try {
     assert.equal(s.page.__pageError, undefined);
+    // The baked EXTRAS item still earns its chip (R9); with extras cleared
+    // too, the true empty state shows with no chips at all.
+    await s.page.evaluate(() => { EXTRAS.length = 0; render(); });
     const empty = await s.page.$eval('#list .empty', e => e.textContent);
     assert.equal(empty, 'No scheduled rides yet for the followed riders.');
     assert.equal(await s.page.$$eval('#days .day-chip', els => els.length), 0, 'no day chips');
@@ -247,7 +250,8 @@ test('K-edge: follow-list names absent from the feed count toward the status but
       status: document.getElementById('status').textContent,
     }));
     assert.equal(r.rows, 1, 'only the real entry renders');
-    // 9 baked (none actually hidden — the hide names nobody) + 1 ghost add.
-    assert.ok(r.status.includes('10 riders followed'), r.status);
+    // 9 baked (none actually hidden — the hide names nobody) + 1 ghost add
+    // in the denominator; only zook actually matched the feed (R4).
+    assert.ok(r.status.includes('1 of 10 riders found'), r.status);
   } finally { await s.context.close(); }
 });

@@ -107,18 +107,89 @@ test('F25: next-up tag on first active row; reads "Now" once underway, "Next up"
   } finally { await s.context.close(); }
 });
 
-test('F26: soon highlight within 30 min; next-up styling wins over soon', async () => {
+test('F26: soon highlight within 30 min before start; next-up styling wins over soon', async () => {
   const s = await openPage({ server, feed: dayFeed(), now: NOON });
   try {
     const soonRow = await rowInfo(s.page, 642);   // in 20 min
     const laterRow = await rowInfo(s.page, 643);  // in 45 min
-    const nextRow = await rowInfo(s.page, 641);   // underway + next-up (also within 30)
     assert.ok(soonRow.classes.includes('soon'));
     assert.ok(!laterRow.classes.includes('soon'), 'outside the 30 min window');
     assert.equal(soonRow.borderColor, 'rgb(180, 83, 9)', 'soon border color');
     // CSS precedence: a next-up row keeps the accent border even if soon.
+    // At 11:10 the first active row (640, rides 11:30) is next-up AND soon.
+    await s.page.evaluate(ms => { window.__setNow(ms); render(); }, denverMs(2026, 7, 18, 11, 10));
+    const nextRow = await rowInfo(s.page, 640);
     assert.ok(nextRow.classes.includes('soon'));
+    assert.ok(nextRow.classes.includes('next-up'));
     assert.equal(nextRow.borderColor, 'rgb(26, 107, 60)', 'next-up wins over soon');
+  } finally { await s.context.close(); }
+});
+
+test('R6: soon applies only before the start (0 < minsUntil <= 30) — underway rows are never orange', async () => {
+  const s = await openPage({ server, feed: dayFeed(), now: NOON });
+  try {
+    // 641 (11:55) is underway at 12:00: within |30| min but not soon.
+    const underway = await rowInfo(s.page, 641);
+    assert.equal(underway.countdown, 'underway');
+    assert.ok(!underway.classes.includes('soon'), 'underway row keeps no soon class');
+
+    // Overlap case from REVIEW #6: extend 640 with an estimate so 641 is
+    // underway WITHOUT being next-up — it must not show the orange border.
+    await s.page.evaluate(() => {
+      EST_IDX['640|Dressage'] = { when: new Date(2026, 6, 18, 12, 30), note: 'held late' };
+      rides = extractRides(lastFeed);
+      render();
+    });
+    const second = await rowInfo(s.page, 641);
+    assert.equal(second.countdown, 'underway');
+    assert.ok(!second.classes.includes('next-up'));
+    assert.ok(!second.classes.includes('soon'));
+    assert.equal(second.borderColor, 'rgb(227, 225, 220)', 'plain border, no orange treatment');
+
+    // Exactly at the listed time (minsUntil = 0): underway, not soon.
+    await s.page.evaluate(ms => {
+      delete EST_IDX['640|Dressage'];
+      rides = extractRides(lastFeed);
+      window.__setNow(ms); render();
+    }, denverMs(2026, 7, 18, 12, 20));
+    const atStart = await rowInfo(s.page, 642);
+    assert.equal(atStart.countdown, 'underway');
+    assert.ok(!atStart.classes.includes('soon'), 'minsUntil 0 is not soon');
+  } finally { await s.context.close(); }
+});
+
+test('R12a: a grace window spanning midnight keeps the row active past 12:00 AM; expired previous-day rows unchanged', async () => {
+  const feed = F.feed([
+    // 23:56 ride: grace runs to 00:06 the next day.
+    F.entry({ pinny: 646, rider: F.FOLLOWED.zook, details: [
+      F.ridingDetail({ phase: 'Show Jumping', venue: 'SJR1', time: F.rideTimeStr(2026, 7, 18, 23, 56) })] }),
+    // 20:00 ride: grace long expired — an ordinary previous-day row.
+    F.entry({ pinny: 647, rider: F.FOLLOWED.aulita, details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 20, 0) })] }),
+  ]);
+  // 00:02 Sun, viewing Saturday (the only day with rides, so it is also the
+  // default view): dayKey < todayKey, but 646's activeUntil (00:06) is
+  // still in the future.
+  const s = await openPage({ server, feed, now: denverMs(2026, 7, 19, 0, 2) });
+  try {
+    await s.page.evaluate(() => { selectedDay = '2026-07-18'; render(); });
+    const active = await rowInfo(s.page, 646);
+    assert.equal(active.countdown, null,
+      'row inside its cross-midnight grace window shows no premature done line');
+    assert.ok(!active.classes.includes('past'), 'not flipped to a past row at 12:00 AM');
+
+    const expired = await rowInfo(s.page, 647);
+    assert.equal(expired.countdown, '✓ scores pending · event complete',
+      'ordinary previous-day row keeps its done line');
+    assert.ok(expired.countdownClasses.includes('done'));
+
+    // Once the grace window runs out, the row becomes a normal previous-day
+    // done row (no dimming, gray done line — same as before the fix).
+    await s.page.evaluate(ms => { window.__setNow(ms); render(); }, denverMs(2026, 7, 19, 0, 7));
+    const after = await rowInfo(s.page, 646);
+    assert.equal(after.countdown, '✓ scores pending · event complete');
+    assert.ok(after.countdownClasses.includes('done'));
+    assert.ok(!after.classes.includes('past'), 'previous-day rows are never dimmed');
   } finally { await s.context.close(); }
 });
 

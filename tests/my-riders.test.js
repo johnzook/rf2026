@@ -46,7 +46,8 @@ test('K45: effectiveFollowing = (FOLLOWING − hidden) ∪ adds; empty storage r
       status: document.getElementById('status').textContent,
     }));
     assert.deepEqual(before.eff, before.baked);
-    assert.ok(before.status.endsWith('· 9 riders followed'), before.status);
+    // pickerFeed matches 2 of the 9 baked names (R4 wording).
+    assert.ok(before.status.endsWith('· 2 of 9 riders found'), before.status);
 
     // Unit: hidden removed from the baked segment, adds appended.
     const combo = await s.page.evaluate(() => {
@@ -143,13 +144,15 @@ test('K48: Removed-note + restore; persistence across reload; fresh context sees
     },
   });
   try {
-    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 10 riders followed'));
+    // Followed: 9 − 1 hidden + 2 adds = 10; matched in the feed: aulita,
+    // Extra Rider, Matchrider R01 (zook is hidden) = 3.
+    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 3 of 10 riders found'));
 
     // Survives reload in the same browser profile.
     await s.page.reload();
     await s.page.waitForFunction(() => lastUpdatedMs !== null);
     await s.page.waitForLoadState('networkidle');
-    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 10 riders followed'));
+    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 3 of 10 riders found'));
 
     // Removed-note with restore link.
     await s.page.click('#edit-riders');
@@ -157,7 +160,8 @@ test('K48: Removed-note + restore; persistence across reload; fresh context sees
     assert.ok(note.includes('Removed: Zook, Penelope'), note);
     await s.page.click('#restore-shared');
     assert.deepEqual(await storage(s.page), { mine: ['Extra, Rider', 'Matchrider, R01'], hidden: [] });
-    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 11 riders followed'));
+    // Restore un-hides zook: 11 followed, 4 matched.
+    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 4 of 11 riders found'));
   } finally { await s.context.close(); }
 
   // A fresh context has no local edits: baked list only.
@@ -165,6 +169,41 @@ test('K48: Removed-note + restore; persistence across reload; fresh context sees
   try {
     assert.deepEqual(await fresh.page.evaluate(() => effectiveFollowing()),
       await fresh.page.evaluate(() => FOLLOWING.slice()));
-    assert.ok((await fresh.page.$eval('#status', el => el.textContent)).endsWith('· 9 riders followed'));
+    assert.ok((await fresh.page.$eval('#status', el => el.textContent)).endsWith('· 2 of 9 riders found'));
   } finally { await fresh.context.close(); }
+});
+
+test('R4: status counts riders actually found; sheet flags names matching nothing in the feed', async () => {
+  const s = await openPage({ server, feed: pickerFeed(), now: NOON });
+  try {
+    // 2 of the 9 baked names (zook, aulita) match the feed.
+    assert.ok((await s.page.$eval('#status', el => el.textContent))
+      .endsWith('· 2 of 9 riders found'));
+
+    // The sheet marks the unmatched names — and only those.
+    await s.page.click('#edit-riders');
+    const rows = await s.page.$$eval('#my-riders-list .rrow', els =>
+      els.map(e => e.textContent.replace('Remove', '').trim()));
+    assert.equal(rows.length, 9);
+    assert.ok(rows.includes('Zook, Penelope'), 'matched rider unflagged');
+    assert.ok(rows.includes('Aulita, Brittany'), 'matched rider unflagged');
+    assert.ok(rows.includes('McMahan, Galena · no entries found'), rows.join(' | '));
+    assert.equal(rows.filter(r => r.endsWith('· no entries found')).length, 7,
+      'all 7 unmatched names flagged');
+
+    // Once every configured name matches, the plain wording returns.
+    await s.page.evaluate(() => {
+      const matched = new Set(['Zook, Penelope', 'Aulita, Brittany']);
+      localStorage.setItem('rf2026:hiddenRiders',
+        JSON.stringify(FOLLOWING.filter(n => !matched.has(n))));
+      rides = extractRides(lastFeed);
+      render();
+      renderRiderSheet();
+    });
+    assert.ok((await s.page.$eval('#status', el => el.textContent))
+      .endsWith('· 2 riders followed'));
+    const rows2 = await s.page.$$eval('#my-riders-list .rrow', els =>
+      els.map(e => e.textContent.replace('Remove', '').trim()));
+    assert.deepEqual(rows2, ['Aulita, Brittany', 'Zook, Penelope'], 'no flags when all found');
+  } finally { await s.context.close(); }
 });

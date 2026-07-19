@@ -102,6 +102,53 @@ test('I38: time row variants — plain, delayed (+N min venue), revised', async 
   } finally { await s.context.close(); }
 });
 
+test('R2: a pinned popover survives re-renders; a vanished row drops the pin without error', async () => {
+  const feed = F.feed([
+    F.entry({ pinny: 711, rider: F.FOLLOWED.zook, details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 13, 0) })] }),
+    F.entry({ pinny: 712, rider: F.FOLLOWED.aulita, details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 14, 0) })] }),
+    F.entry({ pinny: 713, rider: F.FOLLOWED.crocker, details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 15, 0) })] }),
+  ]);
+  const s = await openPage({ server, feed, now: denverMs(2026, 7, 18, 12, 0) });
+  try {
+    const pinned = () => s.page.$$eval('#list .row.pinned .horse b', els => els.map(e => e.textContent));
+    const rowSel = p => `#list .row:has(.horse b:text-is("#${p}"))`;
+
+    await s.page.click(rowSel(712), { position: { x: 10, y: 10 } });
+    assert.deepEqual(await pinned(), ['#712']);
+
+    // Poll-driven re-renders (innerHTML rebuild) keep the pin and the
+    // popover stays visible.
+    await s.page.evaluate(() => { render(); render(); });
+    assert.deepEqual(await pinned(), ['#712'], 'pin survives re-render');
+    assert.ok(await s.page.$eval(`${rowSel(712)} .pop`, el => getComputedStyle(el).display === 'block'),
+      'popover still open after re-render');
+
+    // Click semantics intact on the rebuilt rows: tap another row moves the
+    // pin, tapping the pinned row unpins.
+    await s.page.click(rowSel(711), { position: { x: 10, y: 10 } });
+    assert.deepEqual(await pinned(), ['#711'], 'pin moves after a re-render');
+    await s.page.click(rowSel(711), { position: { x: 10, y: 10 } });
+    assert.deepEqual(await pinned(), [], 'tap toggles off after a re-render');
+
+    // The pinned rider disappears from the feed: re-render drops the pin
+    // silently, no error. (Park the mouse first — hovering 711 keeps its
+    // hover-popover open over row 712, which would swallow the click.)
+    await s.page.mouse.move(0, 0);
+    await s.page.click(rowSel(712), { position: { x: 10, y: 10 } });
+    assert.deepEqual(await pinned(), ['#712']);
+    await s.page.evaluate(() => {
+      lastFeed.EntryList = lastFeed.EntryList.filter(e => e.PinnyNumber !== 712);
+      rides = extractRides(lastFeed);
+      render();
+    });
+    assert.deepEqual(await pinned(), [], 'gone row: nothing pinned');
+    assert.equal(s.page.__pageError, undefined, 'no error when the pinned row vanished');
+  } finally { await s.context.close(); }
+});
+
 test('I39: tap pins exactly one popover; re-tap unpins; clicks inside the popover keep the pin', async () => {
   const feed = F.feed([
     F.entry({ pinny: 708, rider: F.FOLLOWED.zook, details: [

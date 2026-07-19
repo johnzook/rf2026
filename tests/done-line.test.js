@@ -103,7 +103,7 @@ test('H33: out on this ride -> bare status; out later with places -> ✓ place �
   } finally { await s.context.close(); }
 });
 
-test('H34: next: points at the combo\'s next ride from NOW, override-aware, weekday off-today', async () => {
+test('H34: next: points at the combo\'s next ride from NOW at its effective (override/delay-adjusted) time, weekday off-today', async () => {
   const s = await openPage({ server, feed: doneFeed(), scoring: doneScoring(), now: NOON });
   try {
     // Dressage row (8:00) must skip the already-run XC (10:00) and point at
@@ -129,6 +129,39 @@ test('H34: next: points at the combo\'s next ride from NOW, override-aware, week
     // Unit check of nextRideInfo directly: nothing later -> null.
     const none = await s.page.evaluate(() => nextRideInfo({ pinny: 661 }, eventLocalNow()));
     assert.equal(none, null);
+  } finally { await s.context.close(); }
+});
+
+test('R8: next: uses delay-adjusted times — a delayed ride is neither skipped as past nor advertised at the un-delayed time', async () => {
+  // Friday (the baked DELAY_DATE) at 13:00: dressage ran at 8:00 (R4, no
+  // delay); SJ is scheduled 12:30 at SJR4, which carries +90 min -> 2:00 PM.
+  // Un-adjusted logic would treat 12:30 as already past and claim
+  // "event complete"; the done line must instead advertise the delayed time
+  // the SJ row itself displays.
+  const feed = F.feed([
+    F.entry({ pinny: 690, rider: F.FOLLOWED.goodman, division: 'DD', details: [
+      rd('Dressage', 'R4', 7, 17, 8, 0), rd('Show Jumping', 'SJR4', 7, 17, 12, 30)] }),
+  ]);
+  const s = await openPage({ server, feed, now: denverMs(2026, 7, 17, 13, 0) });
+  try {
+    const doneLine = await rowInfo(s.page, 690); // first row for 690 = the 8:00 dressage
+    assert.equal(doneLine.countdown, '✓ scores pending · next: SJ 2:00 PM',
+      'next: shows the delayed time, and the delayed ride is not skipped as past');
+
+    // The SJ row agrees with the advertised time and is still upcoming.
+    const sjRow = await s.page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#list .row')]
+        .filter(r => { const b = r.querySelector('.horse b'); return b && b.textContent === '#690'; });
+      const el = rows[rows.length - 1];
+      return {
+        adj: el.querySelector('.adj').textContent,
+        countdown: el.querySelector('.countdown').textContent,
+        past: el.classList.contains('past'),
+      };
+    });
+    assert.equal(sjRow.adj, '2:00 PM');
+    assert.equal(sjRow.countdown, 'in 1 h 0 min', 'delay-pushed ride is still in the future');
+    assert.equal(sjRow.past, false);
   } finally { await s.context.close(); }
 });
 

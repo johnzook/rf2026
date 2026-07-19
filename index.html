@@ -303,13 +303,16 @@ function parseConfigTime(o) {
   return new Date(y, mo - 1, d, h, +t[2], 0);
 }
 
-// Overrides and estimates indexed by pinny+phase.
-const OVERRIDE_IDX = {};
+// Overrides and estimates indexed by pinny+phase. All object indexes keyed
+// by feed strings are built null-prototyped (Object.create(null)) so a
+// value literally named "constructor"/"toString"/"__proto__" can never
+// resolve to an inherited function.
+const OVERRIDE_IDX = Object.create(null);
 for (const o of OVERRIDES) {
   const when = parseConfigTime(o);
   if (when) OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = when;
 }
-const EST_IDX = {};
+const EST_IDX = Object.create(null);
 for (const o of ESTIMATES) {
   const when = parseConfigTime(o);
   if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
@@ -357,7 +360,7 @@ function extractRides(feed) {
   followedCount = following.size;
   // Divisions whose SJ times are a shared block-start placeholder (in this
   // feed that's all of them, but verify rather than assume).
-  const sjTimes = {};
+  const sjTimes = Object.create(null);
   for (const e of feed.EntryList || []) {
     if (e.Status !== "Accepted") continue;
     for (const rd of e.RidingDetails || []) {
@@ -368,9 +371,11 @@ function extractRides(feed) {
   sjBlockDivs = new Set(Object.keys(sjTimes).filter(d =>
     sjTimes[d].length > 1 && new Set(sjTimes[d]).size === 1));
   const rides = [];
+  const matched = new Set();
   for (const e of feed.EntryList || []) {
     if (!following.has(e.RiderName)) continue;
     if (e.Status !== "Accepted") continue; // skip scratched entries
+    matched.add(e.RiderName); // this followed name exists in the feed
     for (const rd of e.RidingDetails || []) {
       const when = parseRideTime(rd.RideTimes); // empty = not yet scheduled
       if (!when) continue;
@@ -391,6 +396,7 @@ function extractRides(feed) {
       });
     }
   }
+  matchedNames = matched;
   return rides;
 }
 
@@ -398,14 +404,14 @@ function extractRides(feed) {
 // the scoring feed, division names match the entry feed verbatim; never join
 // on rider name — the two feeds format names differently).
 function buildResultsIndex(scoring) {
-  const divName = {};
-  divMeta = {};
+  const divName = Object.create(null);
+  divMeta = Object.create(null);
   for (const d of scoring.DivisionsList || []) {
     divName[d.DivisionId] = d.DivisionName;
     divMeta[d.DivisionName] = { phaseOrder: (d.PhaseOrder || "").toLowerCase() };
   }
-  const idx = {};
-  scoringByDiv = {};
+  const idx = Object.create(null);
+  scoringByDiv = Object.create(null);
   for (const s of scoring.ScoringList || []) {
     const dn = divName[s.DivisionId] || "";
     idx[`${s.Pinny}|${dn}`] = s;
@@ -417,13 +423,14 @@ function buildResultsIndex(scoring) {
 // ---- App state ----
 
 let rides = [];
-let resultsIdx = {};
+let resultsIdx = Object.create(null);
 let selectedDay = null;   // dayKey chosen by the user; null = auto
 let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
 let lastFeed = null;      // last good feed, for re-filtering after my-riders edits
 let followedCount = FOLLOWING.length;
-let scoringByDiv = {};    // DivisionName -> scoring rows, for slot estimates
-let divMeta = {};         // DivisionName -> { phaseOrder }, e.g. "d-xc-sj"
+let matchedNames = null;  // followed names that matched ≥1 accepted entry (null = no feed yet)
+let scoringByDiv = Object.create(null); // DivisionName -> scoring rows, for slot estimates
+let divMeta = Object.create(null);      // DivisionName -> { phaseOrder }, e.g. "d-xc-sj"
 let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
 
 // Last good payloads survive reloads on bad signal (spotty venue cell
@@ -431,8 +438,20 @@ let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
 // fetches retry in the background.
 const CACHE_EVENT = "rf2026:event";
 const CACHE_SCORING = "rf2026:scoring";
+// Serialized payload of the last successful write per key: identical polls
+// (the common case) skip the ~1 MB synchronous rewrite entirely. The blob's
+// `at` stamp therefore only moves when content changes; freshness display
+// uses lastUpdatedMs, which still updates on every successful fetch.
+const lastCacheWrite = Object.create(null);
 function cachePut(key, value) {
-  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), value })); } catch (e) { /* full/blocked */ }
+  const payload = JSON.stringify(value);
+  if (lastCacheWrite[key] === payload) return; // unchanged — skip the write
+  try {
+    // Same bytes JSON.stringify({at, value}) would produce, without
+    // re-serializing the payload.
+    localStorage.setItem(key, `{"at":${Date.now()},"value":${payload}}`);
+    lastCacheWrite[key] = payload;
+  } catch (e) { /* full/blocked */ }
 }
 function cacheGet(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
@@ -480,9 +499,13 @@ const OUT_WORDS = {
   E: "eliminated", IE: "eliminated", TE: "eliminated",
   R: "retired", MR: "retired", RF: "rider fall", W: "withdrawn", IW: "withdrawn",
 };
+// Guarded read of a plain map literal keyed by a feed string: a key like
+// "constructor" must miss (undefined), never resolve to an inherited
+// Object.prototype member. The maps themselves stay plain literals.
+const mapGet = (map, key) => Object.hasOwn(map, key) ? map[key] : undefined;
 function outStatus(ride) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
-  return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
+  return (res && mapGet(OUT_WORDS, (res.FinalPlace || "").trim())) || null;
 }
 
 // For a completed ride, the combo's next ride from NOW (not from this
@@ -490,7 +513,11 @@ function outStatus(ride) {
 // line says what's actually still coming.
 const PHASE_SHORT = { "Cross Country": "XC", "Show Jumping": "SJ" };
 function nextRideInfo(ride, now) {
-  const timeOf = o => o.override || o.when;
+  // Effective time, same rules as the rows themselves (override wins, else
+  // venue delay on DELAY_DATE) — so the advertised "next:" time can never
+  // disagree with that ride's own row, and a ride pushed into the future by
+  // a delay is not skipped as already past.
+  const timeOf = o => adjustedTime(o).adj;
   // Same combo = same pinny; while pinnies are unassigned (null) fall back
   // to rider+horse so two unnumbered combos are never conflated.
   const sameCombo = o => ride.pinny != null
@@ -507,7 +534,7 @@ function nextRideInfo(ride, now) {
     t.toLocaleDateString("en-US", { weekday: "short" }) + " ";
   // This string lands in innerHTML (the countdown line) — escape the phase,
   // the only feed-controlled part.
-  return `next: ${esc(PHASE_SHORT[best.phase] || best.phase)} ${day}${fmtClock(t)}`;
+  return `next: ${esc(mapGet(PHASE_SHORT, best.phase) || best.phase)} ${day}${fmtClock(t)}`;
 }
 
 // A posted phase score means this ride already happened — used to end the
@@ -516,7 +543,7 @@ function nextRideInfo(ride, now) {
 const PHASE_DONE_FIELD = { "Dressage": "DressageScore", "Cross Country": "XCScore", "Show Jumping": "SJScore" };
 function phaseResultPosted(ride) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
-  const field = PHASE_DONE_FIELD[ride.phase];
+  const field = mapGet(PHASE_DONE_FIELD, ride.phase);
   if (!res || !field) return false;
   return !isNaN(parseFloat(res[field]));
 }
@@ -529,7 +556,7 @@ function divisionComplete(divisionName) {
   const rows = scoringByDiv[divisionName] || [];
   if (!rows.length) return false; // unknown -> don't claim final
   const lastPhase = ((divMeta[divisionName] || {}).phaseOrder || "d-xc-sj").split("-").pop();
-  const field = PHASE_SCORE_FIELD[lastPhase] || "SJScore";
+  const field = mapGet(PHASE_SCORE_FIELD, lastPhase) || "SJScore";
   return rows
     .filter(s => !isNaN(parseInt(s.FinalPlace, 10)))
     .every(s => { const v = (s[field] || "").trim(); return v && v !== "--"; });
@@ -550,13 +577,13 @@ function tiedAt(divisionName, field, place) {
 function donePlaces(ride, isFinal) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   if (!res) return { phase: null, overall: null };
-  const pf = PHASE_PLACE_FIELD[ride.phase];
+  const pf = mapGet(PHASE_PLACE_FIELD, ride.phase);
   const pp = parseInt(res[pf], 10);
   const op = parseInt(res.FinalPlace, 10);
   const ppT = pp && tiedAt(ride.division, pf, pp) ? "T" : "";
   const opT = op && tiedAt(ride.division, "FinalPlace", op) ? "T" : "";
   return {
-    phase: pp ? `${PHASE_SHORT[ride.phase] || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
+    phase: pp ? `${mapGet(PHASE_SHORT, ride.phase) || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
     overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)} overall` : null,
   };
 }
@@ -585,7 +612,12 @@ function adjustedTime(ride) {
   if (ride.override) {
     return { adj: ride.override, delayMin: 0, revised: +ride.override !== +ride.when };
   }
-  const mins = ride.dayKey === DELAY_DATE ? DELAYS[ride.venue] || 0 : 0;
+  // DELAYS is a user-edited config literal: guard the venue-keyed read so a
+  // venue named like an Object.prototype member (or a typo'd non-number
+  // value) yields 0 rather than an inherited function.
+  const raw = ride.dayKey === DELAY_DATE && Object.hasOwn(DELAYS, ride.venue)
+    ? DELAYS[ride.venue] : 0;
+  const mins = typeof raw === "number" ? raw : 0;
   return { adj: new Date(ride.when.getTime() + mins * 60_000), delayMin: mins, revised: false };
 }
 
@@ -640,8 +672,12 @@ function render() {
   const now = eventLocalNow();
   const todayKey = isoDay(now);
 
-  // Day chips: every day that has followed rides, in order.
-  const dayKeys = [...new Set(rides.map(r => r.dayKey))].sort();
+  // Day chips: every day that has followed rides OR an extras item, in
+  // order — an EXTRAS entry on a rest day must still be reachable.
+  const extraDays = EXTRAS
+    .map(x => { const d = parseConfigTime(x); return d && isoDay(d); })
+    .filter(Boolean);
+  const dayKeys = [...new Set([...rides.map(r => r.dayKey), ...extraDays])].sort();
   let day = selectedDay && dayKeys.includes(selectedDay) ? selectedDay : null;
   if (!day) {
     // Default: today if it has rides, else the next day with rides, else the last day.
@@ -655,6 +691,15 @@ function render() {
   ).join("");
   for (const btn of daysEl.querySelectorAll(".day-chip")) {
     btn.onclick = () => { selectedDay = btn.dataset.day; render(); };
+  }
+  // Keep the active chip visible in the horizontally scrollable chip row.
+  // Chip-row scrollLeft only — page scroll must never move on a re-render.
+  const activeChip = daysEl.querySelector(".day-chip.active");
+  if (activeChip) {
+    const rowRect = daysEl.getBoundingClientRect();
+    const chipRect = activeChip.getBoundingClientRect();
+    if (chipRect.left < rowRect.left) daysEl.scrollLeft += chipRect.left - rowRect.left;
+    else if (chipRect.right > rowRect.right) daysEl.scrollLeft += chipRect.right - rowRect.right;
   }
 
   // Delay banner — only when viewing the day the delays apply to.
@@ -673,10 +718,20 @@ function render() {
   dayRides.sort((a, b) => a.adj - b.adj);
 
   const list = document.getElementById("list");
+  // Rebuilding #list innerHTML would silently drop a pinned popover (polls
+  // re-render up to every 20 s): remember the pinned row's identity
+  // (pinny|phase|dayKey, its data-key) and re-apply the pin afterwards.
+  const pinnedEl = list.querySelector(".row.pinned");
+  const pinnedKey = pinnedEl ? pinnedEl.dataset.key : null;
   if (dayRides.length === 0) {
     list.innerHTML = `<div class="empty">${rides.length === 0
       ? "No scheduled rides yet for the followed riders."
       : "No rides on this day for the followed riders."}</div>`;
+    // This render consumed the one-shot landing too: if the page first
+    // loads on a day with no rides, the scroll-to-now must not fire
+    // hours/days later when today first gains rows. (Only once feed data
+    // exists — a scoring-first render must not eat the landing early.)
+    if (lastUpdatedMs !== null) initialScrollDone = true;
     return;
   }
 
@@ -694,7 +749,11 @@ function render() {
     // rows active until (estimate ?? time) + grace.
     const activeUntil = (r.est ? r.est.when : r.adj).getTime()
       + PAST_GRACE_MIN * 60_000;
-    const isPastDay = day < todayKey;
+    // A row whose active window spans event-local midnight (late SJ block,
+    // estimate past 12:00 AM) must not flip to a previous-day row the
+    // moment the date rolls over: the day-boundary check only wins once
+    // activeUntil has expired. Ordinary previous-day rows are unaffected.
+    const isPastDay = day < todayKey && now.getTime() > activeUntil;
     // Done when the grace window runs out — or as soon as the score posts
     // for a ride whose listed time has passed (never for future rides).
     const past = isPastDay || (isToday && (now.getTime() > activeUntil
@@ -702,7 +761,8 @@ function render() {
     const out = r.extra ? null : outStatus(r);
     const isNext = isToday && !past && !out && !nextUpFound && (nextUpFound = true);
     const nextTag = minsUntil <= 0 ? "Now" : "Next up";
-    const soon = isToday && !past && !out && minsUntil <= SOON_WINDOW_MIN;
+    // Only before the start: an underway row must not keep orange "soon".
+    const soon = isToday && !past && !out && minsUntil > 0 && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
     if (past) {
       if (r.extra) {
@@ -745,7 +805,7 @@ function render() {
         </div>`;
     }
     return `
-      <div class="row${isNext ? " next-up" : ""}${past && !isPastDay ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}">
+      <div class="row${isNext ? " next-up" : ""}${past && !isPastDay ? " past" : ""}${soon ? " soon" : ""}${out && !past ? " out" : ""}" data-i="${i}" data-key="${esc(`${r.pinny}|${r.phase}|${r.dayKey}`)}">
         ${isNext ? `<div class="next-tag">${nextTag}</div>` : ""}
         <div class="time">
           <div class="adj">${fmtClock(r.adj)}</div>
@@ -773,15 +833,34 @@ function render() {
   }
   list.innerHTML = rowsHTML.join("");
 
-  // Land on "now" once, at first render of today's list. Never afterwards —
-  // re-renders and data refreshes must not move the screen under the user;
-  // the floating button is the deliberate way back.
-  if (!initialScrollDone && isToday) {
-    const el = document.querySelector(".now-line");
-    if (el) {
-      el.scrollIntoView({ block: "center" });
-      initialScrollDone = true;
+  // Re-apply the pin captured above if its row still exists (same
+  // pinny|phase|dayKey); a row that vanished (rider removed, day switched)
+  // just drops the pin. Extras carry no data-key and can't pin.
+  if (pinnedKey) {
+    for (const rowEl of list.querySelectorAll(".row[data-key]")) {
+      if (rowEl.dataset.key === pinnedKey) { rowEl.classList.add("pinned"); break; }
     }
+  }
+
+  // Land on "now" once, only if the FIRST render with feed data shows
+  // today's list. Never afterwards — re-renders and data refreshes must
+  // not move the screen under the user; the floating button is the
+  // deliberate way back. Any data-backed render consumes the one-shot, so
+  // a page opened on a rest day (or showing another day) can't be yanked
+  // later when today's rows first appear. Renders before any feed data
+  // (a scoring response beating the event feed) leave the one-shot armed.
+  if (!initialScrollDone && lastUpdatedMs !== null) {
+    if (isToday) {
+      const el = document.querySelector(".now-line");
+      if (el) el.scrollIntoView({ block: "center" });
+    }
+    initialScrollDone = true;
+  }
+  // Deploy-reload handoff: put the scroll back where it was, once, at the
+  // first render that actually has rows to scroll through.
+  if (restoreScrollY !== null) {
+    window.scrollTo(0, restoreScrollY);
+    restoreScrollY = null;
   }
   updateNowBtn();
 
@@ -798,18 +877,40 @@ function render() {
   let statusText = "";
   if (lastUpdatedMs) {
     const ageMin = Math.round((Date.now() - lastUpdatedMs) / 60_000);
+    // Count riders actually found in the feed, so a typo'd FOLLOWING entry
+    // is visible as "M of N riders found" instead of silently inflating N.
+    const found = matchedNames ? matchedNames.size : followedCount;
+    const followNote = found < followedCount
+      ? `${found} of ${followedCount} riders found`
+      : `${followedCount} riders followed`;
     statusText = ageMin >= 2
       ? `Showing data from ${clockInEventTz(lastUpdatedMs)} (${ageMin < 60 ? ageMin + " min" : Math.round(ageMin / 60) + " h"} old)`
-      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followedCount} riders followed`;
+      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followNote}`;
   }
   document.getElementById("status").textContent = statusText;
 }
 
 // ---- Polling (fail-soft: keep showing the last good data on errors) ----
 
+// Venue cell networks sometimes accept a connection and then hang: without
+// a timeout the fetch never settles, the retry note never shows, and every
+// poll tick would stack another hung request. So every fetch gets a 10 s
+// abort (feature-detected — older browsers just skip the timeout) and a
+// per-function in-flight flag so a new poll returns immediately while the
+// previous one is still pending. The flags reset in `finally`, so a
+// rejected/aborted/timed-out fetch can never wedge polling permanently.
+const FETCH_TIMEOUT_MS = 10_000;
+function fetchTimeoutSignal() {
+  return (typeof AbortSignal !== "undefined" && AbortSignal.timeout)
+    ? AbortSignal.timeout(FETCH_TIMEOUT_MS) : undefined;
+}
+
+let eventFetchInFlight = false;
 async function fetchEventFeed() {
+  if (eventFetchInFlight) return;
+  eventFetchInFlight = true;
   try {
-    const resp = await fetch(EVENT_URL);
+    const resp = await fetch(EVENT_URL, { signal: fetchTimeoutSignal() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const feed = await resp.json();
     lastFeed = feed;
@@ -819,21 +920,50 @@ async function fetchEventFeed() {
     cachePut(CACHE_EVENT, feed);
     document.getElementById("fetch-err").textContent = "";
   } catch (e) {
+    // Timeouts land here too: a hung network shows the same retry note.
     document.getElementById("fetch-err").textContent = "· can't reach ShowConnect, retrying";
+  } finally {
+    eventFetchInFlight = false;
   }
   render();
 }
 
+let scoringFetchInFlight = false;
 async function fetchScoring() {
+  if (scoringFetchInFlight) return;
+  scoringFetchInFlight = true;
   try {
-    const resp = await fetch(SCORING_URL);
+    const resp = await fetch(SCORING_URL, { signal: fetchTimeoutSignal() });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const scoring = await resp.json();
     resultsIdx = buildResultsIndex(scoring);
     cachePut(CACHE_SCORING, scoring);
     render();
   } catch (e) { /* results are a nicety; ignore failures */ }
+  finally { scoringFetchInFlight = false; }
 }
+
+// State handed over by the deploy auto-reload (see checkForNewDeploy):
+// restore the selected day before the first render and the scroll offset at
+// the first render of rows, and suppress the one-time scroll-to-now landing
+// so the reload puts the user back exactly where they were. Only a fresh
+// stamp counts — stale state (>2 min, e.g. a crashed reload from earlier)
+// is discarded and the load behaves like a normal one. The key is consumed
+// (removed) either way; normal loads without the key are unaffected.
+const RELOAD_STATE_KEY = "rf2026:reloadState";
+let restoreScrollY = null;
+try {
+  const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
+  if (raw) {
+    sessionStorage.removeItem(RELOAD_STATE_KEY);
+    const st = JSON.parse(raw);
+    if (st && typeof st.at === "number" && Date.now() - st.at < 2 * 60_000) {
+      if (st.selectedDay) selectedDay = st.selectedDay;
+      if (typeof st.scrollY === "number") restoreScrollY = st.scrollY;
+      initialScrollDone = true; // no scroll-to-now landing on a state-restoring reload
+    }
+  }
+} catch (e) { /* blocked/corrupt storage — behave like a normal load */ }
 
 // Hydrate from cache so the page is useful immediately, even fully offline.
 // Guarded: a cache blob of the wrong shape (older app version, corrupted
@@ -851,7 +981,7 @@ try {
   if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
   if (rides.length) render();
 } catch (e) {
-  lastFeed = null; rides = []; resultsIdx = {}; lastUpdatedMs = null;
+  lastFeed = null; rides = []; resultsIdx = Object.create(null); lastUpdatedMs = null;
 }
 
 // ---- Auto-reload on redeploy ----
@@ -859,23 +989,39 @@ try {
 // delay/follow-list edits reach open phones within a minute of deploy —
 // no separate signal file to maintain, any commit to the page is the signal.
 let deployBaseline = null;
+let deployFetchInFlight = false;
 async function checkForNewDeploy() {
   if (!location.protocol.startsWith("http")) return; // no-op for file://
+  if (deployFetchInFlight) return;
+  deployFetchInFlight = true;
   try {
-    const resp = await fetch(location.href, { cache: "no-store" });
+    const resp = await fetch(location.href, { cache: "no-store", signal: fetchTimeoutSignal() });
     if (!resp.ok) return;
     const text = await resp.text();
     if (deployBaseline === null) deployBaseline = text;
-    else if (text !== deployBaseline) location.reload();
+    else if (text !== deployBaseline) {
+      // Hand the UI state to the post-reload page so a pushed config edit
+      // doesn't yank the user back to the top of "today" (REVIEW #1).
+      try {
+        sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({
+          at: Date.now(), selectedDay, scrollY: window.scrollY,
+        }));
+      } catch (err) { /* blocked storage — reload without state */ }
+      location.reload();
+    }
   } catch (e) { /* offline blip; try again next tick */ }
+  finally { deployFetchInFlight = false; }
 }
 
 // ---- "My riders" picker sheet ----
 
 function renderRiderSheet() {
   const current = effectiveFollowing();
+  // Flag names that matched nothing in the loaded feed (typos, withdrawals).
+  const noMatch = n => matchedNames && !matchedNames.has(n)
+    ? `<small> · no entries found</small>` : "";
   document.getElementById("my-riders-list").innerHTML = (current.length
-    ? current.map(n => `<div class="rrow"><span>${esc(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
+    ? current.map(n => `<div class="rrow"><span>${esc(n)}${noMatch(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
     : `<div class="sheet-sub">Not following anyone — search below to add.</div>`)
     + (getHiddenRiders().length
     ? `<div class="sheet-sub">Removed: ${esc(getHiddenRiders().join("; "))} · <button class="linklike" id="restore-shared">restore</button></div>`
