@@ -477,6 +477,23 @@ function outStatus(ride) {
   return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
 }
 
+// For a completed ride, the combo's next scheduled ride (any day), so a
+// done line says whether they ride again without needing outside context.
+const PHASE_SHORT = { "Cross Country": "XC", "Show Jumping": "SJ" };
+function nextRideInfo(ride) {
+  const timeOf = o => o.override || o.when;
+  let best = null;
+  for (const o of rides) {
+    if (o.pinny !== ride.pinny || timeOf(o) <= timeOf(ride)) continue;
+    if (!best || timeOf(o) < timeOf(best)) best = o;
+  }
+  if (!best) return null;
+  const t = timeOf(best);
+  const day = isoDay(t) === ride.dayKey ? "" :
+    t.toLocaleDateString("en-US", { weekday: "short" }) + " ";
+  return `next: ${PHASE_SHORT[best.phase] || best.phase} ${day}${fmtClock(t)}`;
+}
+
 // "done · 8th in phase · 7th overall" for a completed ride, from the
 // scoring join. Empty when nothing is posted yet.
 const PHASE_PLACE_FIELD = { "Dressage": "DressagePlace", "Cross Country": "XCPlace", "Show Jumping": "SJPlace" };
@@ -632,8 +649,14 @@ function render() {
     const soon = isToday && !past && !out && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
     if (past) {
-      const pl = r.extra ? "" : donePlaces(r);
-      countdown = pl ? `done · ${pl}` : out || (r.extra ? "" : "done");
+      if (r.extra) {
+        countdown = "";
+      } else {
+        const pl = donePlaces(r);
+        // Suffix: the ride status if out, else where this combo rides next.
+        const suffix = out || nextRideInfo(r) || "event complete";
+        countdown = pl ? `done · ${pl} · ${suffix}` : out || `done · ${suffix}`;
+      }
     } else if (out) {
       countdown = out;
     } else if (isToday) {
