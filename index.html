@@ -477,19 +477,20 @@ function outStatus(ride) {
   return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
 }
 
-// For a completed ride, the combo's next scheduled ride (any day), so a
-// done line says whether they ride again without needing outside context.
+// For a completed ride, the combo's next ride from NOW (not from this
+// ride's slot — an in-between phase may already be done too), so a done
+// line says what's actually still coming.
 const PHASE_SHORT = { "Cross Country": "XC", "Show Jumping": "SJ" };
-function nextRideInfo(ride) {
+function nextRideInfo(ride, now) {
   const timeOf = o => o.override || o.when;
   let best = null;
   for (const o of rides) {
-    if (o.pinny !== ride.pinny || timeOf(o) <= timeOf(ride)) continue;
+    if (o.pinny !== ride.pinny || timeOf(o) <= now) continue;
     if (!best || timeOf(o) < timeOf(best)) best = o;
   }
   if (!best) return null;
   const t = timeOf(best);
-  const day = isoDay(t) === ride.dayKey ? "" :
+  const day = isoDay(t) === isoDay(now) ? "" :
     t.toLocaleDateString("en-US", { weekday: "short" }) + " ";
   return `next: ${PHASE_SHORT[best.phase] || best.phase} ${day}${fmtClock(t)}`;
 }
@@ -656,7 +657,7 @@ function render() {
         // ✓ marks the ride completed; then this ride's place, the combo's
         // standing (worded "currently"/"finished"), then out status or the
         // next ride when there is one.
-        const nxt = out ? null : nextRideInfo(r);
+        const nxt = out ? null : nextRideInfo(r, now);
         const p = donePlaces(r, !out && !nxt);
         const bits = [p.phase, p.overall].filter(Boolean);
         if (out) {
