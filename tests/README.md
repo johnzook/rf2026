@@ -59,6 +59,8 @@ explicit `executablePath` — never run `playwright install`).
 | K45–K48 | `my-riders.test.js` |
 | L49, N52–N53 | `misc.test.js` |
 | M50–M51 | `scroll.test.js` |
+| Bug regressions (`BUG-*`) | `robustness.test.js` |
+| Edge-case hardening (`A/C/E/F/I/J/K-edge`) | `edge-cases.test.js` |
 
 All 54 items are covered; none skipped. Each test name starts with the
 item number(s) it covers (some tests cover two adjacent items, some items
@@ -78,5 +80,30 @@ Notes on specific items:
 - **K45**'s "byte-identical" assertion compares `#list` innerHTML before and
   after a localStorage round-trip against the baked list.
 
-No bugs in `index.html` were found by the suite; no changes to
-`index.html` were needed for testability.
+No changes to `index.html` were needed for testability. A later bug-hunt
+pass found five defects, each fixed in `index.html` and pinned by a
+`BUG-*` test in `robustness.test.js`:
+
+- **BUG-phase-escape** — the done line's `next: <phase>` was interpolated
+  into `innerHTML` unescaped (the one feed string that bypassed `esc()`).
+- **BUG-null-pinny-popover** — the popover subtitle rendered a dangling
+  `· #` when `PinnyNumber` was null (rows already guarded it).
+- **BUG-null-pinny-next** — `nextRideInfo` matched combos by
+  `pinny !==`, so two null-pinny combos compared equal and one combo's
+  done line could point at another's ride; now falls back to rider+horse.
+- **BUG-myriders-non-array** — `getStoredList` returned any valid-JSON
+  value; a non-array in `rf2026:myRiders`/`hiddenRiders` crashed
+  `effectiveFollowing()` and left the page empty behind a phantom
+  "can't reach ShowConnect" note. Now guarded with `Array.isArray`.
+- **BUG-cache-hydrate-crash** — cache hydration ran unguarded at top
+  level; a wrong-shape cached payload threw before the fetches and event
+  listeners were installed, bricking the page. Now wrapped in try/catch.
+
+`edge-cases.test.js` adds hardening beyond the numbered items: degenerate
+feed shapes (missing `RidingDetails`, empty/null `Venues`, empty
+`EntryList`, scoring rows for unknown divisions), a ride exactly at "now",
+all-past and all-out days, identical-time sort stability, a zero-delay
+`DELAYS` map on `DELAY_DATE`, an auto estimate crossing midnight,
+quota-exceeded localStorage writes, and follow-list names absent from the
+feed. Product-level concerns found in the same pass live in
+[`../REVIEW.md`](../REVIEW.md), deliberately not "fixed" in code.
