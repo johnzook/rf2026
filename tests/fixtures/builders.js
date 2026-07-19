@@ -47,8 +47,8 @@ function feed(entries = []) {
   return { EventDetails: { EventName: 'Test Event' }, EntryList: entries };
 }
 
-function division({ id, name }) {
-  return { DivisionId: id, DivisionName: name, DivisionStatus: 'ACTIVE' };
+function division({ id, name, phaseOrder = 'd-xc-sj' }) {
+  return { DivisionId: id, DivisionName: name, DivisionStatus: 'ACTIVE', PhaseOrder: phaseOrder };
 }
 
 // One ScoringList row. Feed uses "--" (or "") for not-posted values.
