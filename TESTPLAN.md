@@ -43,8 +43,11 @@ top-level functions directly in a browser context) or a functional test
 
 ## B. Day chips & default day
 
-9. One chip per day having followed rides, in date order; "Today" label
-   for the current event-local date.
+9. One chip per day having followed rides OR an `EXTRAS` item (union of
+   ride days and parsed extras dates), in date order; "Today" label for
+   the current event-local date. A day whose only content is an extras
+   item still gets a chip and renders the extras — never the "no rides"
+   empty-state message.
 10. Default day = today if it has rides; else the next day with rides;
     else the last day. User's chip selection sticks across re-renders.
 
@@ -93,8 +96,10 @@ top-level functions directly in a browser context) or a functional test
     when listed time has passed but not activeUntil.
 25. "Next up" tag on the first non-past, non-out row; label reads
     "Next up" before the listed time and "Now" once underway.
-26. `soon` highlight within 30 min, never on out rows, never on next-up
-    (CSS gives next-up precedence).
+26. `soon` highlight only before the start: `0 < minsUntil <= 30`. An
+    underway row (minsUntil <= 0) never carries the orange soon
+    treatment; never on out rows, never visually on next-up (CSS gives
+    next-up precedence when both classes apply).
 27. The now-line marker sits between the last row with adjusted time <
     now and the first >= now (position by time, not by past/active
     state); shown only when viewing today; label `now · H:MM AM/PM`.
@@ -152,12 +157,18 @@ top-level functions directly in a browser context) or a functional test
 
 40. Successful event/scoring fetches cache payloads to localStorage
     (`rf2026:event`, `rf2026:scoring`) with a timestamp; on load the page
-    hydrates and renders from cache before any network response.
+    hydrates and renders from cache before any network response. A fetch
+    whose serialized payload is identical to the last-written one skips
+    the localStorage write entirely (the blob and its `at` stamp only
+    change when content changes); `lastUpdatedMs` still refreshes on
+    every successful event fetch.
 41. With all network blocked and a warm cache, reload still renders rows
     and results; error note "can't reach ShowConnect, retrying" appears.
-42. Status line: fresh data → `Updated H:MM · N riders followed`; data
-    older than 2 min → `Showing data from H:MM (N min old)` (hours form
-    past 60 min).
+42. Status line: fresh data → `Updated H:MM · N riders followed` when
+    every followed name matched at least one accepted entry in the feed,
+    or `Updated H:MM · M of N riders found` when only M of the N did;
+    data older than 2 min → `Showing data from H:MM (N min old)` (hours
+    form past 60 min).
 43. Fetch failures never clear previously-rendered data (fail-soft);
     scoring failures are silent.
 44. Deploy watcher: identical self-fetch → no reload; changed bytes →
@@ -179,13 +190,17 @@ top-level functions directly in a browser context) or a functional test
 48. "Removed: ... · restore" note appears when hides exist; restore
     clears all hides. Personal state persists across reload; a fresh
     browser context sees only the baked list. Follower count in status
-    reflects the effective set.
+    reflects the effective set (worded per item 42's found/followed
+    rule). Once a feed has loaded, sheet rows for followed names that
+    matched no accepted entry carry a muted `· no entries found` note.
 
 ## L. Extras (course walks etc.)
 
 49. `EXTRAS` items render on their date's chip only, sorted into the
     timeline by time, dashed style, no popover, no pinny; countdown and
-    next-up participation like rides; nothing shown once past.
+    next-up participation like rides; nothing shown once past. Per item
+    9, an extras item's date always has a chip even with no rides that
+    day.
 
 ## M. Scroll behavior
 
@@ -203,3 +218,35 @@ top-level functions directly in a browser context) or a functional test
     names with `<`, `&`, quotes render literally, no element injection).
 54. `isoDay`, `fmtClock` (12-hour, 12 AM/PM correctness), `ordinal`
     helpers behave per examples above.
+
+## O. July 2026 UX/robustness fixes (REVIEW items 3, 4, 6, 9, 10, 11)
+
+55. Redundant cache writes are skipped: `cachePut` serializes the payload
+    once, remembers the last-written string per key in a module variable,
+    and returns without touching localStorage when it is unchanged. A
+    changed payload writes exactly once with a fresh `at` stamp; a write
+    blocked by quota is retried on the next poll (the last-written marker
+    is only set after a successful write). (Test `R3:`; also folded into
+    item 40.)
+
+56. Rider-found feedback: `extractRides` records the set of followed
+    names that matched at least one accepted entry. Status shows
+    `M of N riders found` when M < N, plain `N riders followed`
+    otherwise; the my-riders sheet appends a muted `· no entries found`
+    to unmatched rows, only once a feed has loaded. (Test `R4:`; items
+    42/48 updated.)
+
+57. Active-chip visibility: after rendering the day chips, if the active
+    chip is not fully visible inside the scrollable chip row, the row's
+    `scrollLeft` is adjusted (left or right, minimal movement) so it is.
+    Chips are never reordered or collapsed, and window/page scroll is
+    never touched by this adjustment. (Test `R10:`.)
+
+58. Prototype-safe lookups: `OVERRIDE_IDX`, `EST_IDX`, `sjTimes`,
+    `divName`, `divMeta`, `resultsIdx`, and `scoringByDiv` are built with
+    `Object.create(null)`, and the `DELAYS[venue]` config read is guarded
+    with `Object.hasOwn` plus a `typeof === "number"` check — so a venue
+    or division literally named `constructor`/`toString`/`__proto__`
+    yields safe defaults (0 delay, normal join) instead of inherited
+    functions, and a typo'd non-number delay value shifts nothing.
+    (Test `R11:`.)

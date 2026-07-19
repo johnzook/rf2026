@@ -1,7 +1,7 @@
 # Test suite for index.html
 
 Automated Playwright suite covering every numbered behavior in
-[`../TESTPLAN.md`](../TESTPLAN.md) (items A1–N54).
+[`../TESTPLAN.md`](../TESTPLAN.md) (items A1–O58).
 
 ## Running
 
@@ -61,8 +61,9 @@ explicit `executablePath` — never run `playwright install`).
 | M50–M51 | `scroll.test.js` |
 | Bug regressions (`BUG-*`) | `robustness.test.js` |
 | Edge-case hardening (`A/C/E/F/I/J/K-edge`) | `edge-cases.test.js` |
+| O55–O58 (REVIEW fixes, `R3/R4/R6/R9/R10/R11`) | `persistence` (R3), `my-riders` (R4), `lifecycle` (R6), `days` (R9), `scroll` (R10), `robustness` (R11) |
 
-All 54 items are covered; none skipped. Each test name starts with the
+All numbered items (A1–O58) are covered; none skipped. Each test name starts with the
 item number(s) it covers (some tests cover two adjacent items, some items
 get several assertions across tests).
 

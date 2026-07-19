@@ -55,6 +55,57 @@ test('J40: good fetches cache both payloads with a timestamp; cache renders befo
   } finally { await s.context.close(); }
 });
 
+test('R3: unchanged payloads skip the cache rewrite; changed payloads write again with a fresh stamp', async () => {
+  const s = await openPage({ server, feed: simpleFeed(), scoring: simpleScoring(), now: NOON });
+  try {
+    // Spy on every localStorage write from here on (the initial load's two
+    // cache writes have already happened).
+    await s.page.evaluate(() => {
+      window.__writes = [];
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) { window.__writes.push(k); return orig.call(this, k, v); };
+    });
+
+    // Two full poll rounds with byte-identical payloads: zero writes, but
+    // lastUpdatedMs (freshness display) still advances per fetch.
+    await s.page.evaluate(async ms => {
+      window.__setNow(ms);
+      await fetchEventFeed(); await fetchScoring();
+      await fetchEventFeed(); await fetchScoring();
+    }, NOON + 60_000);
+    const afterSame = await s.page.evaluate(() => ({
+      writes: window.__writes.slice(),
+      lastUpdatedMs,
+      cachedAt: JSON.parse(localStorage.getItem('rf2026:event')).at,
+    }));
+    assert.deepEqual(afterSame.writes, [], 'no writes for unchanged payloads');
+    assert.equal(afterSame.lastUpdatedMs, NOON + 60_000, 'freshness still updates every fetch');
+    assert.equal(afterSame.cachedAt, NOON, 'cache stamp untouched while content is unchanged');
+
+    // A changed event payload writes exactly once, refreshing the stamp.
+    const changed = simpleFeed();
+    changed.EntryList[0].RidingDetails[0].RideTimes = F.rideTimeStr(2026, 7, 18, 15, 0);
+    await s.context.route('**/api/sc/event/1187', r => r.fulfill({
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify(changed),
+    }));
+    await s.page.evaluate(async ms => { window.__setNow(ms); await fetchEventFeed(); }, NOON + 120_000);
+    const afterChange = await s.page.evaluate(() => ({
+      writes: window.__writes.slice(),
+      cached: JSON.parse(localStorage.getItem('rf2026:event')),
+    }));
+    assert.deepEqual(afterChange.writes, ['rf2026:event'], 'changed payload written once');
+    assert.equal(afterChange.cached.at, NOON + 120_000, 'stamp refreshed on content change');
+    assert.ok(afterChange.cached.value.EntryList[0].RidingDetails[0].RideTimes.includes('3:00:00 PM'),
+      'cache holds the new payload');
+
+    // The identical payload again: still no further writes.
+    await s.page.evaluate(() => fetchEventFeed());
+    assert.deepEqual(await s.page.evaluate(() => window.__writes), ['rf2026:event']);
+  } finally { await s.context.close(); }
+});
+
 test('J41: fully offline with warm cache: rows + results render, retry note shows', async () => {
   const s = await openPage({
     server, now: NOON, network: 'abort',
@@ -80,7 +131,8 @@ test('J42: status line — fresh vs minutes-old vs hours-old data', async () => 
   const s = await openPage({ server, feed: simpleFeed(), scoring: simpleScoring(), now: NOON });
   try {
     const status = () => s.page.$eval('#status', el => el.textContent);
-    assert.equal(await status(), 'Updated 12:00 PM · 9 riders followed');
+    // simpleFeed contains only one of the nine followed names (R4).
+    assert.equal(await status(), 'Updated 12:00 PM · 1 of 9 riders found');
     await s.page.evaluate(() => { lastUpdatedMs = Date.now() - 5 * 60_000; render(); });
     assert.equal(await status(), 'Showing data from 11:55 AM (5 min old)');
     await s.page.evaluate(() => { lastUpdatedMs = Date.now() - 180 * 60_000; render(); });

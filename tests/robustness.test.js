@@ -106,7 +106,7 @@ test('BUG-myriders-non-array: non-array JSON in the follow-list keys degrades to
     }));
     assert.equal(r.rows, 1, 'the followed ride renders');
     assert.equal(r.err, '', 'no phantom network-error note');
-    assert.ok(r.status.includes('9 riders followed'), r.status);
+    assert.ok(r.status.includes('1 of 9 riders found'), r.status);
     assert.deepEqual(r.mine, []);
     assert.deepEqual(r.hidden, []);
     assert.equal(s.page.__pageError, undefined);
@@ -116,6 +116,73 @@ test('BUG-myriders-non-array: non-array JSON in the follow-list keys degrades to
     const listed = await s.page.$$eval('#my-riders-list .rrow', els => els.length);
     assert.equal(listed, 9, 'sheet lists the baked follow list');
     assert.equal(s.page.__pageError, undefined);
+  } finally { await s.context.close(); }
+});
+
+// Plain-object indexes keyed by feed strings resolved inherited Object
+// prototype members: a venue named "constructor" picked up a FUNCTION as its
+// delay (NaN times), and a division named "constructor"/"__proto__" crashed
+// the scoring joins. Indexes are now null-prototyped and the DELAYS config
+// read is guarded with Object.hasOwn + a typeof number check.
+test('R11: venues/divisions named like Object.prototype members get safe defaults, not inherited functions', async () => {
+  const feed = F.feed([
+    // Rides on DELAY_DATE (Jul 17) so the DELAYS lookup path is exercised.
+    F.entry({ pinny: 890, rider: F.FOLLOWED.zook, division: 'constructor', divisionShort: 'C', details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'constructor', time: F.rideTimeStr(2026, 7, 17, 13, 0) })] }),
+    F.entry({ pinny: 891, rider: F.FOLLOWED.aulita, division: '__proto__', details: [
+      F.ridingDetail({ phase: 'Show Jumping', venue: 'toString', time: F.rideTimeStr(2026, 7, 17, 14, 0) })] }),
+  ]);
+  const scoring = F.scoring({
+    divisions: [F.division({ id: 60, name: 'constructor' }), F.division({ id: 61, name: '__proto__' })],
+    rows: [
+      F.scoringRow({ pinny: 890, divisionId: 60, dressageScore: '30.0', dressagePlace: '1', finalPlace: '1' }),
+      F.scoringRow({ pinny: 891, divisionId: 61, finalPlace: '2' }),
+    ],
+  });
+  const s = await openPage({ server, feed, scoring, now: denverMs(2026, 7, 17, 12, 0) });
+  try {
+    assert.equal(s.page.__pageError, undefined, 'no crash rendering hostile names');
+
+    // Venue "constructor" on the delay day: 0 delay, real clock time.
+    const r890 = await s.page.evaluate(pinny => {
+      const rows = [...document.querySelectorAll('#list .row')];
+      const el = rows.find(r => { const b = r.querySelector('.horse b'); return b && b.textContent === '#' + pinny; });
+      return el && {
+        adj: el.querySelector('.adj').textContent,
+        orig: el.querySelector('.orig') && el.querySelector('.orig').textContent,
+        pop: el.querySelector('.pop').textContent.replace(/\s+/g, ' ').trim(),
+      };
+    }, 890);
+    assert.equal(r890.adj, '1:00 PM', 'no NaN time from an inherited-function "delay"');
+    assert.equal(r890.orig, null, 'not treated as delayed');
+    assert.ok(r890.pop.includes('30.0 (1st)'), 'scoring join works for division "constructor": ' + r890.pop);
+
+    // Division "__proto__" joins as an own key too (no prototype pollution).
+    assert.equal(await s.page.evaluate(() =>
+      Object.prototype.phaseOrder === undefined && !('891|__proto__' in {})), true);
+    const r891 = await s.page.evaluate(() =>
+      resultsIdx['891|__proto__'] && resultsIdx['891|__proto__'].FinalPlace);
+    assert.equal(r891, '2', 'scoring row indexed under the literal "__proto__" name');
+
+    // Unit probes: every prototype-member venue yields 0 delay on the delay
+    // date; a typo'd non-number DELAYS value is ignored; real venues still work.
+    const probes = await s.page.evaluate(() => {
+      const mk = venue => ({ when: new Date(2026, 6, 17, 9, 0), override: null, dayKey: '2026-07-17', venue });
+      const p = v => { const a = adjustedTime(mk(v)); return [fmtClock(a.adj), a.delayMin]; };
+      DELAYS.BADTYPE = '45'; // config typo: a string must not shift times
+      const out = {
+        ctor: p('constructor'), toStr: p('toString'), proto: p('__proto__'),
+        hasOwnProp: p('hasOwnProperty'), bad: p('BADTYPE'), real: p('SJR4'),
+      };
+      delete DELAYS.BADTYPE;
+      return out;
+    });
+    assert.deepEqual(probes.ctor, ['9:00 AM', 0]);
+    assert.deepEqual(probes.toStr, ['9:00 AM', 0]);
+    assert.deepEqual(probes.proto, ['9:00 AM', 0]);
+    assert.deepEqual(probes.hasOwnProp, ['9:00 AM', 0]);
+    assert.deepEqual(probes.bad, ['9:00 AM', 0], 'non-number DELAYS value ignored');
+    assert.deepEqual(probes.real, ['10:30 AM', 90], 'legitimate delays still apply');
   } finally { await s.context.close(); }
 });
 

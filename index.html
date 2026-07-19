@@ -303,13 +303,16 @@ function parseConfigTime(o) {
   return new Date(y, mo - 1, d, h, +t[2], 0);
 }
 
-// Overrides and estimates indexed by pinny+phase.
-const OVERRIDE_IDX = {};
+// Overrides and estimates indexed by pinny+phase. All object indexes keyed
+// by feed strings are built null-prototyped (Object.create(null)) so a
+// value literally named "constructor"/"toString"/"__proto__" can never
+// resolve to an inherited function.
+const OVERRIDE_IDX = Object.create(null);
 for (const o of OVERRIDES) {
   const when = parseConfigTime(o);
   if (when) OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = when;
 }
-const EST_IDX = {};
+const EST_IDX = Object.create(null);
 for (const o of ESTIMATES) {
   const when = parseConfigTime(o);
   if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
@@ -357,7 +360,7 @@ function extractRides(feed) {
   followedCount = following.size;
   // Divisions whose SJ times are a shared block-start placeholder (in this
   // feed that's all of them, but verify rather than assume).
-  const sjTimes = {};
+  const sjTimes = Object.create(null);
   for (const e of feed.EntryList || []) {
     if (e.Status !== "Accepted") continue;
     for (const rd of e.RidingDetails || []) {
@@ -368,9 +371,11 @@ function extractRides(feed) {
   sjBlockDivs = new Set(Object.keys(sjTimes).filter(d =>
     sjTimes[d].length > 1 && new Set(sjTimes[d]).size === 1));
   const rides = [];
+  const matched = new Set();
   for (const e of feed.EntryList || []) {
     if (!following.has(e.RiderName)) continue;
     if (e.Status !== "Accepted") continue; // skip scratched entries
+    matched.add(e.RiderName); // this followed name exists in the feed
     for (const rd of e.RidingDetails || []) {
       const when = parseRideTime(rd.RideTimes); // empty = not yet scheduled
       if (!when) continue;
@@ -391,6 +396,7 @@ function extractRides(feed) {
       });
     }
   }
+  matchedNames = matched;
   return rides;
 }
 
@@ -398,14 +404,14 @@ function extractRides(feed) {
 // the scoring feed, division names match the entry feed verbatim; never join
 // on rider name — the two feeds format names differently).
 function buildResultsIndex(scoring) {
-  const divName = {};
-  divMeta = {};
+  const divName = Object.create(null);
+  divMeta = Object.create(null);
   for (const d of scoring.DivisionsList || []) {
     divName[d.DivisionId] = d.DivisionName;
     divMeta[d.DivisionName] = { phaseOrder: (d.PhaseOrder || "").toLowerCase() };
   }
-  const idx = {};
-  scoringByDiv = {};
+  const idx = Object.create(null);
+  scoringByDiv = Object.create(null);
   for (const s of scoring.ScoringList || []) {
     const dn = divName[s.DivisionId] || "";
     idx[`${s.Pinny}|${dn}`] = s;
@@ -417,13 +423,14 @@ function buildResultsIndex(scoring) {
 // ---- App state ----
 
 let rides = [];
-let resultsIdx = {};
+let resultsIdx = Object.create(null);
 let selectedDay = null;   // dayKey chosen by the user; null = auto
 let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
 let lastFeed = null;      // last good feed, for re-filtering after my-riders edits
 let followedCount = FOLLOWING.length;
-let scoringByDiv = {};    // DivisionName -> scoring rows, for slot estimates
-let divMeta = {};         // DivisionName -> { phaseOrder }, e.g. "d-xc-sj"
+let matchedNames = null;  // followed names that matched ≥1 accepted entry (null = no feed yet)
+let scoringByDiv = Object.create(null); // DivisionName -> scoring rows, for slot estimates
+let divMeta = Object.create(null);      // DivisionName -> { phaseOrder }, e.g. "d-xc-sj"
 let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
 
 // Last good payloads survive reloads on bad signal (spotty venue cell
@@ -431,8 +438,20 @@ let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
 // fetches retry in the background.
 const CACHE_EVENT = "rf2026:event";
 const CACHE_SCORING = "rf2026:scoring";
+// Serialized payload of the last successful write per key: identical polls
+// (the common case) skip the ~1 MB synchronous rewrite entirely. The blob's
+// `at` stamp therefore only moves when content changes; freshness display
+// uses lastUpdatedMs, which still updates on every successful fetch.
+const lastCacheWrite = Object.create(null);
 function cachePut(key, value) {
-  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), value })); } catch (e) { /* full/blocked */ }
+  const payload = JSON.stringify(value);
+  if (lastCacheWrite[key] === payload) return; // unchanged — skip the write
+  try {
+    // Same bytes JSON.stringify({at, value}) would produce, without
+    // re-serializing the payload.
+    localStorage.setItem(key, `{"at":${Date.now()},"value":${payload}}`);
+    lastCacheWrite[key] = payload;
+  } catch (e) { /* full/blocked */ }
 }
 function cacheGet(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
@@ -585,7 +604,12 @@ function adjustedTime(ride) {
   if (ride.override) {
     return { adj: ride.override, delayMin: 0, revised: +ride.override !== +ride.when };
   }
-  const mins = ride.dayKey === DELAY_DATE ? DELAYS[ride.venue] || 0 : 0;
+  // DELAYS is a user-edited config literal: guard the venue-keyed read so a
+  // venue named like an Object.prototype member (or a typo'd non-number
+  // value) yields 0 rather than an inherited function.
+  const raw = ride.dayKey === DELAY_DATE && Object.hasOwn(DELAYS, ride.venue)
+    ? DELAYS[ride.venue] : 0;
+  const mins = typeof raw === "number" ? raw : 0;
   return { adj: new Date(ride.when.getTime() + mins * 60_000), delayMin: mins, revised: false };
 }
 
@@ -640,8 +664,12 @@ function render() {
   const now = eventLocalNow();
   const todayKey = isoDay(now);
 
-  // Day chips: every day that has followed rides, in order.
-  const dayKeys = [...new Set(rides.map(r => r.dayKey))].sort();
+  // Day chips: every day that has followed rides OR an extras item, in
+  // order — an EXTRAS entry on a rest day must still be reachable.
+  const extraDays = EXTRAS
+    .map(x => { const d = parseConfigTime(x); return d && isoDay(d); })
+    .filter(Boolean);
+  const dayKeys = [...new Set([...rides.map(r => r.dayKey), ...extraDays])].sort();
   let day = selectedDay && dayKeys.includes(selectedDay) ? selectedDay : null;
   if (!day) {
     // Default: today if it has rides, else the next day with rides, else the last day.
@@ -655,6 +683,15 @@ function render() {
   ).join("");
   for (const btn of daysEl.querySelectorAll(".day-chip")) {
     btn.onclick = () => { selectedDay = btn.dataset.day; render(); };
+  }
+  // Keep the active chip visible in the horizontally scrollable chip row.
+  // Chip-row scrollLeft only — page scroll must never move on a re-render.
+  const activeChip = daysEl.querySelector(".day-chip.active");
+  if (activeChip) {
+    const rowRect = daysEl.getBoundingClientRect();
+    const chipRect = activeChip.getBoundingClientRect();
+    if (chipRect.left < rowRect.left) daysEl.scrollLeft += chipRect.left - rowRect.left;
+    else if (chipRect.right > rowRect.right) daysEl.scrollLeft += chipRect.right - rowRect.right;
   }
 
   // Delay banner — only when viewing the day the delays apply to.
@@ -702,7 +739,8 @@ function render() {
     const out = r.extra ? null : outStatus(r);
     const isNext = isToday && !past && !out && !nextUpFound && (nextUpFound = true);
     const nextTag = minsUntil <= 0 ? "Now" : "Next up";
-    const soon = isToday && !past && !out && minsUntil <= SOON_WINDOW_MIN;
+    // Only before the start: an underway row must not keep orange "soon".
+    const soon = isToday && !past && !out && minsUntil > 0 && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
     if (past) {
       if (r.extra) {
@@ -798,9 +836,15 @@ function render() {
   let statusText = "";
   if (lastUpdatedMs) {
     const ageMin = Math.round((Date.now() - lastUpdatedMs) / 60_000);
+    // Count riders actually found in the feed, so a typo'd FOLLOWING entry
+    // is visible as "M of N riders found" instead of silently inflating N.
+    const found = matchedNames ? matchedNames.size : followedCount;
+    const followNote = found < followedCount
+      ? `${found} of ${followedCount} riders found`
+      : `${followedCount} riders followed`;
     statusText = ageMin >= 2
       ? `Showing data from ${clockInEventTz(lastUpdatedMs)} (${ageMin < 60 ? ageMin + " min" : Math.round(ageMin / 60) + " h"} old)`
-      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followedCount} riders followed`;
+      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followNote}`;
   }
   document.getElementById("status").textContent = statusText;
 }
@@ -851,7 +895,7 @@ try {
   if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
   if (rides.length) render();
 } catch (e) {
-  lastFeed = null; rides = []; resultsIdx = {}; lastUpdatedMs = null;
+  lastFeed = null; rides = []; resultsIdx = Object.create(null); lastUpdatedMs = null;
 }
 
 // ---- Auto-reload on redeploy ----
@@ -874,8 +918,11 @@ async function checkForNewDeploy() {
 
 function renderRiderSheet() {
   const current = effectiveFollowing();
+  // Flag names that matched nothing in the loaded feed (typos, withdrawals).
+  const noMatch = n => matchedNames && !matchedNames.has(n)
+    ? `<small> · no entries found</small>` : "";
   document.getElementById("my-riders-list").innerHTML = (current.length
-    ? current.map(n => `<div class="rrow"><span>${esc(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
+    ? current.map(n => `<div class="rrow"><span>${esc(n)}${noMatch(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
     : `<div class="sheet-sub">Not following anyone — search below to add.</div>`)
     + (getHiddenRiders().length
     ? `<div class="sheet-sub">Removed: ${esc(getHiddenRiders().join("; "))} · <button class="linklike" id="restore-shared">restore</button></div>`

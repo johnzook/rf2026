@@ -1,10 +1,10 @@
 # UX / design review — potential rough edges
 
-Findings from a bug-hunt and review pass (July 2026). None of these are
-implemented; each is a product call for the owner. Genuine defects found in
-the same pass were fixed directly and are covered by `BUG-*` tests in
-`tests/robustness.test.js` — the items below are the ones that need a
-decision, not a patch.
+Findings from a bug-hunt and review pass (July 2026). Each was a product
+call for the owner; items marked FIXED have since been approved and
+implemented (see the `Resolved:` note and the referenced `R*:` tests).
+Genuine defects found in the original pass were fixed directly and are
+covered by `BUG-*` tests in `tests/robustness.test.js`.
 
 ## 1. Deploy auto-reload throws away UI state
 
@@ -38,7 +38,15 @@ seconds means it vanishes underneath you.
 renders and re-apply the class; or skip re-render when nothing changed
 (feed bytes are usually identical between polls).
 
-## 3. ~1 MB localStorage write on every poll
+## 3. ~~A ~1 MB localStorage write on every poll~~ FIXED
+
+Resolved: `cachePut` serializes once and skips the write when the payload
+matches the last-written string (kept in a module variable, no storage
+re-read); the blob's `at` stamp moves only when content changes, while
+`lastUpdatedMs` — which drives the staleness display — still updates on
+every successful fetch. Covered by test `R3:` (TESTPLAN 40/55).
+
+### Original note
 
 **Today:** every successful event fetch (20 s cadence) re-serializes and
 rewrites the full ~1 MB feed to `rf2026:event`, and scoring (~360 KB)
@@ -53,7 +61,15 @@ the offline cache silently stops updating).
 stored (a cheap length+hash check), or throttle cache writes to every few
 minutes — cache freshness of minutes is fine for its offline purpose.
 
-## 4. "N riders followed" counts names, not riders found
+## 4. ~~"N riders followed" counts names, not riders found~~ FIXED
+
+Resolved: `extractRides` now tracks which followed names matched at least
+one accepted entry; the status line reads `M of N riders found` when
+fewer matched than are configured (plain `N riders followed` otherwise),
+and the my-riders sheet appends a muted `· no entries found` to unmatched
+rows once a feed has loaded. Covered by test `R4:` (TESTPLAN 42/48/56).
+
+### Original note
 
 **Today:** the status line counts `effectiveFollowing()` — configured
 names, including typos and personal adds that match nothing in the feed
@@ -87,7 +103,13 @@ opening the popover.
 phase score fields) as completing the ride immediately: done-line as soon
 as results exist, grace window only as the fallback when they don't.
 
-## 6. Soon-highlight (orange) stays on rows that are already underway
+## 6. ~~Soon-highlight (orange) stays on rows that are already underway~~ FIXED
+
+Resolved: `soon` is now scoped to `0 < minsUntil <= 30`, so underway rows
+never keep the orange treatment (the overlapping-rides case shows a plain
+border). Covered by test `R6:` (TESTPLAN 26).
+
+### Original note
 
 **Today:** `soon` is `minsUntil <= 30`, which includes negative values, so
 an underway row keeps the orange "starting soon" treatment until it goes
@@ -132,7 +154,14 @@ specifically on the chaotic day when people rely on the page most.
 TESTPLAN 34) — kept out of the bug-fix pass because the current behavior
 is what the TESTPLAN specifies.
 
-## 9. A day with only an EXTRAS item is unreachable
+## 9. ~~A day with only an EXTRAS item is unreachable~~ FIXED
+
+Resolved: the day-chip list is now the union of ride days and parsed
+`EXTRAS` dates, so an extras-only day gets a chip and renders its extras
+(the "no rides" empty state cannot hide them). Covered by test `R9:`
+(TESTPLAN 9/49).
+
+### Original note
 
 **Today:** day chips are derived from rides only; an `EXTRAS` entry on a
 date with no followed rides gets no chip, so it can never be displayed.
@@ -143,7 +172,15 @@ never appears, and the config looks correct.
 **Direction:** include EXTRAS dates when building the chip list, or log a
 console warning for unreachable extras.
 
-## 10. Past-day chips accumulate over the event week
+## 10. ~~Past-day chips accumulate over the event week~~ FIXED (light variant)
+
+Resolved with the auto-scroll option only: after each render, if the
+active chip is not fully visible the chip row's own `scrollLeft` is
+adjusted to bring it into view (page scroll is never touched; chips are
+not reordered or collapsed, so past chips still accumulate but "Today"
+is always on screen). Covered by test `R10:` (TESTPLAN 57).
+
+### Original note
 
 **Today:** every day with followed rides keeps its chip all week; by
 Sunday the row starts with Wed/Thu/Fri/Sat before Today, pushing "Today"
@@ -155,7 +192,16 @@ row starts scrolled to the left.
 **Direction:** order past days after future ones, collapse them behind a
 "earlier ▸" chip, or auto-scroll the chip row so Today is visible.
 
-## 11. Plain-object lookups keyed by feed strings
+## 11. ~~Plain-object lookups keyed by feed strings~~ FIXED
+
+Resolved: the built indexes (`OVERRIDE_IDX`, `EST_IDX`, `sjTimes`,
+`divName`, `divMeta`, `resultsIdx`, `scoringByDiv`) are now created with
+`Object.create(null)`, and the user-edited `DELAYS` literal is read
+through an `Object.hasOwn` + `typeof === "number"` guard — hostile or
+typo'd values yield 0 delay / no match. Covered by test `R11:`
+(TESTPLAN 58).
+
+### Original note
 
 **Today:** `DELAYS[ride.venue]`, `sjTimes[e.Division]`,
 `scoringByDiv[dn]`, `divName[s.DivisionId]` are plain-object lookups keyed
