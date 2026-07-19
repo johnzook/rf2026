@@ -235,6 +235,9 @@ const OVERRIDES = [
 // rider ahead in the printed order of go, skipping riders marked E/R/RF/W
 // (out of the competition, unlikely to start). Shown as secondary info
 // only — the main time stays the official block start.
+// SJ slots are also estimated automatically from live standings (order of
+// go is reverse of placing); entries here come from official printed
+// order-of-go sheets and take precedence over the automatic estimate.
 const ESTIMATES = [
   // Observed: #337 (10th in JONB order) started 2:15 → Galena anchored from there.
   { pinny: 343, phase: "Show Jumping", date: "2026-07-17", time: "2:21 PM", note: "13th of 17 to jump" }, // McMahan (JONB)
@@ -349,6 +352,18 @@ function buildRiderIndex(feed) {
 function extractRides(feed) {
   const following = new Set(effectiveFollowing());
   followedCount = following.size;
+  // Divisions whose SJ times are a shared block-start placeholder (in this
+  // feed that's all of them, but verify rather than assume).
+  const sjTimes = {};
+  for (const e of feed.EntryList || []) {
+    if (e.Status !== "Accepted") continue;
+    for (const rd of e.RidingDetails || []) {
+      if (rd.Phase === "Show Jumping" && rd.RideTimes)
+        (sjTimes[e.Division] = sjTimes[e.Division] || []).push(rd.RideTimes);
+    }
+  }
+  sjBlockDivs = new Set(Object.keys(sjTimes).filter(d =>
+    sjTimes[d].length > 1 && new Set(sjTimes[d]).size === 1));
   const rides = [];
   for (const e of feed.EntryList || []) {
     if (!following.has(e.RiderName)) continue;
@@ -383,8 +398,11 @@ function buildResultsIndex(scoring) {
   const divName = {};
   for (const d of scoring.DivisionsList || []) divName[d.DivisionId] = d.DivisionName;
   const idx = {};
+  scoringByDiv = {};
   for (const s of scoring.ScoringList || []) {
-    idx[`${s.Pinny}|${divName[s.DivisionId] || ""}`] = s;
+    const dn = divName[s.DivisionId] || "";
+    idx[`${s.Pinny}|${dn}`] = s;
+    (scoringByDiv[dn] = scoringByDiv[dn] || []).push(s);
   }
   return idx;
 }
@@ -397,6 +415,8 @@ let selectedDay = null;   // dayKey chosen by the user; null = auto
 let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
 let lastFeed = null;      // last good feed, for re-filtering after my-riders edits
 let followedCount = FOLLOWING.length;
+let scoringByDiv = {};    // DivisionName -> scoring rows, for slot estimates
+let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
 
 // Last good payloads survive reloads on bad signal (spotty venue cell
 // service): render cached data instantly, stamped with its age, while
@@ -455,6 +475,26 @@ const OUT_WORDS = {
 function outStatus(ride) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   return (res && OUT_WORDS[(res.FinalPlace || "").trim()]) || null;
+}
+
+// Automatic SJ slot estimate from live standings: order of go is reverse of
+// placing, so slot = block start + ~2 min per still-competing combo placed
+// below this one. Recomputed on every scoring poll, so it self-corrects as
+// earlier phases finish. `base` is the delay-adjusted block start.
+const SJ_PACE_MIN = 2;
+function autoEstimate(ride, base) {
+  if (ride.phase !== "Show Jumping" || !sjBlockDivs.has(ride.division)) return null;
+  const rows = scoringByDiv[ride.division] || [];
+  const mine = rows.find(s => s.Pinny === ride.pinny);
+  const myPlace = parseInt(mine && mine.FinalPlace, 10);
+  if (isNaN(myPlace)) return null;
+  const actives = rows.filter(s => !isNaN(parseInt(s.FinalPlace, 10)));
+  const ahead = actives.filter(s => parseInt(s.FinalPlace, 10) > myPlace).length;
+  const n = ahead + 1;
+  return {
+    when: new Date(base.getTime() + ahead * SJ_PACE_MIN * 60_000),
+    note: `${n}${ordinal(n)} of ${actives.length} to jump, by standing`,
+  };
 }
 
 function adjustedTime(ride) {
@@ -560,10 +600,15 @@ function render() {
   let nextUpFound = false;
   const rowsHTML = dayRides.map((r, i) => {
     const minsUntil = Math.round((r.adj - now) / 60_000);
+    // Slot estimate: a manual entry from a printed order-of-go sheet wins;
+    // otherwise compute one from live standings.
+    if (!(r.est && isoDay(r.est.when) === r.dayKey)) {
+      r.est = r.extra ? null : autoEstimate(r, r.adj);
+    }
     // A row isn't "done" at its listed time: an SJ block runs until the
     // rider's estimated slot, and any ride takes a few minutes — so keep
     // rows active until (estimate ?? time) + grace.
-    const activeUntil = (r.est && isoDay(r.est.when) === r.dayKey ? r.est.when : r.adj).getTime()
+    const activeUntil = (r.est ? r.est.when : r.adj).getTime()
       + PAST_GRACE_MIN * 60_000;
     const past = isToday && now.getTime() > activeUntil;
     const out = r.extra ? null : outStatus(r);
@@ -572,7 +617,7 @@ function render() {
     const soon = isToday && !past && !out && minsUntil <= SOON_WINDOW_MIN;
     let countdown = "";
     if (out && !past) {
-      countdown = `${out} — not expected to ride`;
+      countdown = out;
     } else if (isToday) {
       countdown = past ? "done"
         : minsUntil <= 0 ? "underway"
@@ -607,8 +652,7 @@ function render() {
           <div class="venue">${esc(r.venue)}${r.divisionShort ? " · " + esc(r.divisionShort) : ""}</div>
         </div>
         ${countdown ? `<div class="countdown">${countdown}</div>` : ""}
-        ${r.est && isoDay(r.est.when) === r.dayKey
-          ? `<div class="est">est. slot <b>~${fmtClock(r.est.when)}</b> · ${esc(r.est.note)}</div>` : ""}
+        ${r.est ? `<div class="est">est. slot <b>~${fmtClock(r.est.when)}</b> · ${esc(r.est.note)}</div>` : ""}
         ${popoverHTML(r, r.adj, r.delayMin)}
       </div>`;
   });
