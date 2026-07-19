@@ -399,7 +399,11 @@ function extractRides(feed) {
 // on rider name — the two feeds format names differently).
 function buildResultsIndex(scoring) {
   const divName = {};
-  for (const d of scoring.DivisionsList || []) divName[d.DivisionId] = d.DivisionName;
+  divMeta = {};
+  for (const d of scoring.DivisionsList || []) {
+    divName[d.DivisionId] = d.DivisionName;
+    divMeta[d.DivisionName] = { phaseOrder: (d.PhaseOrder || "").toLowerCase() };
+  }
   const idx = {};
   scoringByDiv = {};
   for (const s of scoring.ScoringList || []) {
@@ -419,6 +423,7 @@ let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
 let lastFeed = null;      // last good feed, for re-filtering after my-riders edits
 let followedCount = FOLLOWING.length;
 let scoringByDiv = {};    // DivisionName -> scoring rows, for slot estimates
+let divMeta = {};         // DivisionName -> { phaseOrder }, e.g. "d-xc-sj"
 let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
 
 // Last good payloads survive reloads on bad signal (spotty venue cell
@@ -503,6 +508,20 @@ function nextRideInfo(ride, now) {
   // This string lands in innerHTML (the countdown line) — escape the phase,
   // the only feed-controlled part.
   return `next: ${esc(PHASE_SHORT[best.phase] || best.phase)} ${day}${fmtClock(t)}`;
+}
+
+// A combo may be done riding while its division is still running — placings
+// can change until the last rider in the division's final phase has gone.
+// "finished Nth overall" must wait for that; until then it's "currently".
+const PHASE_SCORE_FIELD = { d: "DressageScore", xc: "XCScore", sj: "SJScore" };
+function divisionComplete(divisionName) {
+  const rows = scoringByDiv[divisionName] || [];
+  if (!rows.length) return false; // unknown -> don't claim final
+  const lastPhase = ((divMeta[divisionName] || {}).phaseOrder || "d-xc-sj").split("-").pop();
+  const field = PHASE_SCORE_FIELD[lastPhase] || "SJScore";
+  return rows
+    .filter(s => !isNaN(parseInt(s.FinalPlace, 10)))
+    .every(s => { const v = (s[field] || "").trim(); return v && v !== "--"; });
 }
 
 // Places for a completed ride, from the scoring join. The phase label
@@ -668,7 +687,7 @@ function render() {
         // standing (worded "currently"/"finished"), then out status or the
         // next ride when there is one.
         const nxt = out ? null : nextRideInfo(r, now);
-        const p = donePlaces(r, !out && !nxt);
+        const p = donePlaces(r, !out && !nxt && divisionComplete(r.division));
         const bits = [p.phase, p.overall].filter(Boolean);
         if (out) {
           // e.g. "✓ Dressage 14th · withdrawn", or just "eliminated" when

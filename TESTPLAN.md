@@ -109,7 +109,11 @@ top-level functions directly in a browser context) or a functional test
 
 31. With places: `✓ {Dressage|XC|SJ} Nth · currently Nth overall ·
     next: ...` while the combo rides again; `✓ ... · finished Nth
-    overall` (no suffix) when the event is over for them.
+    overall` (no suffix) only once the combo is done riding AND its
+    division's final phase is complete (every still-competing combo has a
+    posted score in the division's last phase per `PhaseOrder`; out combos
+    ignored) — placings can change while later riders are on course, so a
+    done-riding combo in a live division stays "currently".
 32. No places posted and not out: `✓ scores pending · <next|event
     complete>`; `event complete` also appended when finished but overall
     place missing.

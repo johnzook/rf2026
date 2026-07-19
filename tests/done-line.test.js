@@ -42,13 +42,21 @@ function doneFeed() {
     F.entry({ pinny: 667, rider: F.FOLLOWED.braitling, division: 'DD',
       details: [rd('Dressage', 'R4', 7, 18, 8, 0), rd('Cross Country', 'XC', 7, 18, 10, 0),
                 rd('Show Jumping', 'SJR1', 7, 19, 15, 0)] }),
+    // H31c: SJ done, division EE fully complete -> finished.
+    F.entry({ pinny: 668, rider: F.FOLLOWED.zook, division: 'EE',
+      details: [rd('Show Jumping', 'SJR1', 7, 18, 9, 30)] }),
   ]);
 }
 
 function doneScoring() {
   return F.scoring({
-    divisions: [F.division({ id: 30, name: 'DD' })],
+    divisions: [F.division({ id: 30, name: 'DD' }), F.division({ id: 31, name: 'EE' })],
     rows: [
+      // Division EE: every still-competing combo has its final phase (SJ)
+      // posted, so EE is complete; the retired row's missing SJ is ignored.
+      F.scoringRow({ pinny: 668, divisionId: 31, sjScore: '30.0', sjPlace: '2', finalPoints: '30.0', finalPlace: '2' }),
+      F.scoringRow({ pinny: 669, divisionId: 31, sjScore: '28.0', sjPlace: '1', finalPoints: '28.0', finalPlace: '1' }),
+      F.scoringRow({ pinny: 670, divisionId: 31, finalPlace: 'R' }),
       F.scoringRow({ pinny: 660, divisionId: 30, xcScore: '33.8', xcPlace: '3', finalPoints: '33.8', finalPlace: '2' }),
       F.scoringRow({ pinny: 661, divisionId: 30, sjScore: '28.0', sjPlace: '1', finalPoints: '28.0', finalPlace: '1' }),
       // 662, 663: no scoring rows at all.
@@ -65,8 +73,14 @@ test('H31: done rides show ✓ phase place + currently/finished overall + next r
   try {
     const stillRiding = await rowInfo(s.page, 660);
     assert.equal(stillRiding.countdown, '✓ XC 3rd · currently 2nd overall · next: SJ 3:00 PM');
-    const finished = await rowInfo(s.page, 661);
-    assert.equal(finished.countdown, '✓ SJ 1st · finished 1st overall');
+    // 661 is done riding but a competitor in DD still jumps at 3:00 PM, so
+    // the division isn't final — "currently", never "finished", until the
+    // last rider of the division's final phase has a posted score.
+    const doneButDivisionLive = await rowInfo(s.page, 661);
+    assert.equal(doneButDivisionLive.countdown, '✓ SJ 1st · currently 1st overall');
+    // 668's division EE has all active final-phase scores posted -> finished.
+    const finished = await rowInfo(s.page, 668);
+    assert.equal(finished.countdown, '✓ SJ 2nd · finished 2nd overall');
   } finally { await s.context.close(); }
 });
 
