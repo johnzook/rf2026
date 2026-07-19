@@ -494,15 +494,16 @@ function nextRideInfo(ride) {
   return `next: ${PHASE_SHORT[best.phase] || best.phase} ${day}${fmtClock(t)}`;
 }
 
-// "done · 8th in phase · 7th overall" for a completed ride, from the
-// scoring join. Empty when nothing is posted yet.
+// "XC 9th · 9th overall" for a completed ride, from the scoring join —
+// the phase label binds the place to this specific ride. Empty when
+// nothing is posted yet.
 const PHASE_PLACE_FIELD = { "Dressage": "DressagePlace", "Cross Country": "XCPlace", "Show Jumping": "SJPlace" };
 function donePlaces(ride) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   if (!res) return "";
   const parts = [];
   const pp = parseInt(res[PHASE_PLACE_FIELD[ride.phase]], 10);
-  if (pp) parts.push(`${pp}${ordinal(pp)} in phase`);
+  if (pp) parts.push(`${PHASE_SHORT[ride.phase] || ride.phase} ${pp}${ordinal(pp)}`);
   const op = parseInt(res.FinalPlace, 10);
   if (op) parts.push(`${op}${ordinal(op)} overall`);
   return parts.join(" · ");
@@ -653,9 +654,10 @@ function render() {
         countdown = "";
       } else {
         const pl = donePlaces(r);
-        // Suffix: the ride status if out, else where this combo rides next.
+        // ✓ marks the ride as completed; then its result (or pending),
+        // then the ride status if out, else where this combo rides next.
         const suffix = out || nextRideInfo(r) || "event complete";
-        countdown = pl ? `done · ${pl} · ${suffix}` : out || `done · ${suffix}`;
+        countdown = pl ? `✓ ${pl} · ${suffix}` : out || `✓ scores pending · ${suffix}`;
       }
     } else if (out) {
       countdown = out;
