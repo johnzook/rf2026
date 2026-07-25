@@ -84,16 +84,22 @@ All verified live against ShowConnect during the event:
 
 ## Deferred features (discussed, deliberately not built)
 
-1. **.ics calendar export** — the only push-notification substitute
-   available to a static page. Highest-value deferred item.
-2. **Per-rider share links** (`?rider=` filter) — so each family shares a
-   URL scoped to their rider.
-3. **Override-vs-feed drift detection** — flag when the feed's time
-   disagrees with a configured override (stale override, or a further
-   revision). Declined for this event; likely worth it for a generic
-   tool where overrides are routine.
-4. **Auto day-flip at midnight** (REVIEW #12b) — current behavior (flip)
-   was judged correct; revisit only if users complain.
+Owner's dispositions recorded post-event (July 2026):
+
+1. **.ics calendar export** — recorded as an idea; future potential only,
+   not planned. The only push-notification substitute available to a
+   static page.
+2. **Per-rider share links** (`?rider=` filter) — subsumed by the generic
+   version: solving "not hard-coded" there should cover per-viewer rider
+   scoping; don't build separately.
+3. **Override-vs-feed drift detection** — owner expects this to be the
+   HARDEST part of a generic tool: schedule revisions are super rare but
+   high-impact when they happen (this event re-ordered an entire XC day
+   and moved one rider 4+ hours). Design attention should go here —
+   detecting when the feed catches up to or further revises a manual
+   override, and reconciling the three time layers.
+4. **Auto day-flip at midnight** (REVIEW #12b) — agreed correct as-is;
+   any change is future work if ever done.
 5. Rejected outright, reasons still valid: push notifications (backend),
    auto-parsing order-of-go PDFs (irregular layouts; human-in-the-loop
    was more reliable), `scoringPhaseLive` live tracking (never saw data).
