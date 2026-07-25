@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rebecca Farm — Ride Times</title>
+<title>Ride Times</title>
 <style>
   :root {
     --bg: #f6f5f2;
@@ -48,6 +48,13 @@
     margin: 10px 14px 0; padding: 8px 12px; border-radius: 10px;
     background: #fdeaea; color: var(--delay); font-size: 13px; font-weight: 600;
   }
+  .share-banner {
+    margin: 10px 14px 0; padding: 10px 12px; border-radius: 10px;
+    background: var(--accent-soft); color: var(--ink); font-size: 13px;
+    max-width: 640px;
+  }
+  .share-banner b { font-weight: 650; }
+  .share-banner-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   main { padding: 10px 14px 60px; max-width: 640px; margin: 0 auto; }
   .empty { color: var(--muted); text-align: center; padding: 48px 0; font-size: 14px; }
 
@@ -149,124 +156,305 @@
   .rbtn.add { background: var(--accent); border-color: var(--accent); color: #fff; }
   .rbtn.rm { color: var(--delay); }
   .rtag { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  a.rbtn { text-decoration: none; color: var(--ink); display: inline-block; }
+  #share-row { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+  .share-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 2px 0 6px; }
+
+  /* Event picker view */
+  #picker { padding: 16px 14px 60px; max-width: 640px; margin: 0 auto; }
+  #picker h1 { font-size: 20px; margin: 8px 0 2px; }
+  #picker-search, #picker-manual {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 16px;
+    border: 1px solid var(--line); border-radius: 10px; font-family: inherit;
+    background: var(--card); margin: 10px 0 4px;
+  }
+  .psec {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin: 18px 2px 6px;
+  }
+  .erow {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  }
+  .erow .ename { font-weight: 650; font-size: 15px; }
+  .erow .emeta { font-size: 12px; color: var(--muted); }
+  .erow .enote { font-size: 11px; color: var(--soon); }
+  .manual-row { display: flex; gap: 8px; align-items: center; }
+  .manual-row input { flex: 1; margin: 6px 0; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1 id="event-name">Rebecca Farm — Ride Times</h1>
+  <h1 id="event-name">Ride Times</h1>
   <div class="sub">
     <span id="status">Loading…</span>
     <span id="fetch-err" class="err"></span>
     <button id="edit-riders" class="linklike">＋ my riders</button>
+    <button id="switch-event" class="linklike">switch event</button>
   </div>
   <div class="days" id="days"></div>
 </header>
 <div id="delay-banner" class="delay-banner" hidden></div>
+<div id="share-banner" class="share-banner" hidden>
+  <div id="share-banner-text"></div>
+  <div class="share-banner-btns">
+    <button id="share-adopt-add" class="rbtn">Add to mine</button>
+    <button id="share-adopt-replace" class="rbtn">Replace mine</button>
+    <button id="share-adopt-ignore" class="rbtn">Ignore</button>
+  </div>
+</div>
 <main id="list"><div class="empty">Loading ride times…</div></main>
-<footer>Times are event-local (Mountain). Tap a ride for details.</footer>
+<footer>Times are event-local. Tap a ride for details.</footer>
 <button id="now-btn" hidden>now</button>
 
 <div id="rider-sheet" hidden>
   <div class="sheet-card">
     <div class="sheet-head"><b>My riders</b><button id="sheet-close" aria-label="Close">✕</button></div>
-    <div class="sheet-sub">Riders you add here are saved on this phone only — everyone else's page is unaffected.</div>
+    <div class="sheet-sub">Riders you add here are saved on this phone only — share a link below to send your list to someone else.</div>
     <div id="my-riders-list"></div>
+    <div id="share-row" hidden>
+      <div class="sheet-sub">Share this list — anyone opening the link gets these riders for this event.</div>
+      <div class="share-btns">
+        <button id="share-native" class="rbtn add" hidden>Share…</button>
+        <a id="share-sms" class="rbtn" href="#">Text it</a>
+        <button id="share-copy" class="rbtn">Copy link</button>
+        <span id="share-copied" class="rtag" hidden>copied</span>
+      </div>
+    </div>
     <input id="rider-search" placeholder="Search rider name…" autocomplete="off">
     <div id="rider-results"></div>
   </div>
 </div>
 
+<div id="picker" hidden>
+  <h1>Choose an event</h1>
+  <div class="sheet-sub">Ride times &amp; live results for ShowConnect events. Pick yours below.</div>
+  <input id="picker-search" placeholder="Search events by name or location…" autocomplete="off">
+  <div id="picker-err" class="sheet-sub err" hidden></div>
+  <div id="picker-list"><div class="empty">Loading events…</div></div>
+  <div class="psec">Or enter an event directly</div>
+  <div class="manual-row">
+    <input id="picker-manual" placeholder="ShowConnectId or showconnect.org link…" autocomplete="off">
+    <button id="picker-go" class="rbtn add">Go</button>
+  </div>
+  <div id="manual-err" class="sheet-sub err" hidden></div>
+</div>
+
 <script>
 /* ========================================================================
-   EDIT SURFACE — the only two things to change between deploys.
+   EDIT SURFACE — per-event maintainer config.
+   Delays, overrides, slot estimates and extras are keyed by the event's
+   ShowConnectId. Edit the entry for the running event, commit, redeploy —
+   open pages pick it up on the next poll after deploy. Config for other
+   events is inert. The 1187 block below (The Event at Rebecca Farm 2026)
+   is the worked example.
    ======================================================================== */
 
-// Riders to follow. Must match the feed's "Last, First" format verbatim,
-// including spelling and capitalization.
-const FOLLOWING = [
-  "Aulita, Brittany",    // 429 Dynamic Deluxe, 245 Ellie
-  "Zook, Penelope",      // 472 Eddy
-  "McMahan, Galena",     // 343 Dragon In Training
-  "Corkery, Maddie",     // 501 Curlout
-  "Grandia, Marc",       // 35 GHS Calexico, 46 Imhotep de Kreisker, 270 Captain Alfred
-  "Yakovac, Reese",      // 147 JB Future Sharp
-  "Braitling, Rebecca",  // 62 MBF Braxy V
-  "Goodman, Stephanie",  // 4 Elwenda DP, 10 Korella vd Watermolen, 41 Diranca, 70 Cord Johnson
-  "Crocker, Shelby",     // 192 Sportsfield Harley Davis, 441 LS Chez Bond
-];
-
-// Per-venue delay in minutes (ring running behind). Edit on a weather day,
-// commit, redeploy — the page picks it up on the next poll after deploy.
-// Delays apply ONLY to rides on this date (event-local), so other days'
-// times are never shifted. On a new weather day, update this date along
-// with the numbers below.
-const DELAY_DATE = "2026-07-17";
-
-// Fri Jul 17: SJ ~1h30; FEI dressage (R1) 1h; HT dressage (R2/R3) 1h30.
-const DELAYS = {
-  XC: 0, // Friday XC was fully re-ordered — revised times live in OVERRIDES below
-  SJR1: 0,
-  SJR3: 0,
-  SJR4: 90,
-  R1: 60,
-  R2: 90,
-  R3: 90,
-  R4: 0,
-  R5: 0,
-  "Phase A": 0,
+const EVENT_CONFIGS = {
+  1187: {
+    // Per-venue delay in minutes (ring running behind). Delays apply ONLY
+    // to rides on delayDate (event-local), so other days' times are never
+    // shifted. On a new weather day, update the date along with the numbers.
+    delayDate: "2026-07-17",
+    // Fri Jul 17: SJ ~1h30; FEI dressage (R1) 1h; HT dressage (R2/R3) 1h30.
+    delays: {
+      XC: 0, // Friday XC was fully re-ordered — revised times live in overrides below
+      SJR1: 0,
+      SJR3: 0,
+      SJR4: 90,
+      R1: 60,
+      R2: 90,
+      R3: 90,
+      R4: 0,
+      R5: 0,
+      "Phase A": 0,
+    },
+    // Exact revised times from official order-of-go sheets, when a ring is
+    // re-ordered rather than uniformly delayed. An override replaces the
+    // feed's scheduled time for that horse+phase (venue delays are NOT
+    // added on top). Remove entries once the feed catches up or the day is
+    // over.
+    overrides: [
+      // Friday XC revised order of go (xcfriREVISED.pdf):
+      { pinny: 245, phase: "Cross Country", date: "2026-07-17", time: "4:40 PM" }, // Aulita / Ellie
+      { pinny: 192, phase: "Cross Country", date: "2026-07-17", time: "5:42 PM" }, // Crocker / Sportsfield Harley Davis
+      { pinny: 270, phase: "Cross Country", date: "2026-07-17", time: "6:16 PM" }, // Grandia / Captain Alfred
+      // Friday SJ Ring 4 Beginner Novice block starts (sjring4friBN.pdf):
+      { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:25 PM" }, // Crocker / LS Chez Bond (JOBNA start)
+      { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:45 PM" }, // Zook / Eddy (JOBNC start)
+    ],
+    // Estimated individual slot within an SJ block: block start + ~2 min per
+    // rider ahead in the printed order of go, skipping riders marked E/R/RF/W
+    // (out of the competition, unlikely to start). Shown as secondary info
+    // only — the main time stays the official block start.
+    // SJ slots are also estimated automatically from live standings (order of
+    // go is reverse of placing); entries here come from official printed
+    // order-of-go sheets and take precedence over the automatic estimate.
+    estimates: [
+      // Observed: #337 (10th in JONB order) started 2:15 → Galena anchored from there.
+      { pinny: 343, phase: "Show Jumping", date: "2026-07-17", time: "2:21 PM", note: "13th of 17 to jump" }, // McMahan (JONB)
+      { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:47 PM", note: "12th of 13 to jump" }, // Crocker (JOBNA)
+      { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:49 PM", note: "3rd of 12 to jump" },  // Zook (JOBNC)
+      // Saturday SJ Ring 4 order of go (sjring4satBN.pdf), SOBNA block starts 8:30:
+      { pinny: 501, phase: "Show Jumping", date: "2026-07-18", time: "8:40 AM", note: "6th of 14 to jump" },  // Corkery (SOBNA)
+    ],
+    // One-off schedule items (course walks, etc.) shown inline in the
+    // timeline at their start time, alongside the rides.
+    extras: [
+      { date: "2026-07-17", time: "3:25 PM", title: "Beginner Novice course walk",
+        detail: "3:25–3:55 PM · Ring 4, then water & drag until 4:25 — Shelby & Penelope's divisions" },
+    ],
+  },
 };
-
-// Exact revised times from official order-of-go sheets, when a ring is
-// re-ordered rather than uniformly delayed. An override replaces the feed's
-// scheduled time for that horse+phase (venue delays are NOT added on top).
-// Remove entries once the feed catches up or the day is over.
-const OVERRIDES = [
-  // Friday XC revised order of go (xcfriREVISED.pdf):
-  { pinny: 245, phase: "Cross Country", date: "2026-07-17", time: "4:40 PM" }, // Aulita / Ellie
-  { pinny: 192, phase: "Cross Country", date: "2026-07-17", time: "5:42 PM" }, // Crocker / Sportsfield Harley Davis
-  { pinny: 270, phase: "Cross Country", date: "2026-07-17", time: "6:16 PM" }, // Grandia / Captain Alfred
-  // Friday SJ Ring 4 Beginner Novice block starts (sjring4friBN.pdf):
-  { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:25 PM" }, // Crocker / LS Chez Bond (JOBNA start)
-  { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:45 PM" }, // Zook / Eddy (JOBNC start)
-];
-
-// Estimated individual slot within an SJ block: block start + ~2 min per
-// rider ahead in the printed order of go, skipping riders marked E/R/RF/W
-// (out of the competition, unlikely to start). Shown as secondary info
-// only — the main time stays the official block start.
-// SJ slots are also estimated automatically from live standings (order of
-// go is reverse of placing); entries here come from official printed
-// order-of-go sheets and take precedence over the automatic estimate.
-const ESTIMATES = [
-  // Observed: #337 (10th in JONB order) started 2:15 → Galena anchored from there.
-  { pinny: 343, phase: "Show Jumping", date: "2026-07-17", time: "2:21 PM", note: "13th of 17 to jump" }, // McMahan (JONB)
-  { pinny: 441, phase: "Show Jumping", date: "2026-07-17", time: "4:47 PM", note: "12th of 13 to jump" }, // Crocker (JOBNA)
-  { pinny: 472, phase: "Show Jumping", date: "2026-07-17", time: "5:49 PM", note: "3rd of 12 to jump" },  // Zook (JOBNC)
-  // Saturday SJ Ring 4 order of go (sjring4satBN.pdf), SOBNA block starts 8:30:
-  { pinny: 501, phase: "Show Jumping", date: "2026-07-18", time: "8:40 AM", note: "6th of 14 to jump" },  // Corkery (SOBNA)
-];
-
-// One-off schedule items (course walks, etc.) shown inline in the timeline
-// at their start time, alongside the rides.
-const EXTRAS = [
-  { date: "2026-07-17", time: "3:25 PM", title: "Beginner Novice course walk",
-    detail: "3:25–3:55 PM · Ring 4, then water & drag until 4:25 — Shelby & Penelope's divisions" },
-];
 
 /* ======================================================================== */
 
-const EVENT_ID = 1187;
-const EVENT_URL = `https://scripts.showconnect.org/api/sc/event/${EVENT_ID}`;
-const SCORING_URL = `${EVENT_URL}/scoringLive`;
-const EVENT_TZ = "America/Denver"; // Kalispell, MT
+const API_BASE = "https://scripts.showconnect.org/api/sc/event";
+const CALENDAR_URL = API_BASE; // no id → full event calendar (~11 KB)
 const EVENT_POLL_MS = 20_000;
 const SCORING_POLL_MS = 60_000;
 const DEPLOY_POLL_MS = 60_000;
+const CALENDAR_TTL_MS = 6 * 60 * 60_000; // revalidate the calendar cache after 6 h
 const SOON_WINDOW_MIN = 30; // highlight rides within the next N minutes
 const PAST_GRACE_MIN = 10;  // keep a row active this long past its (estimated) time
 
 const MONTHS = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+
+// ---- Storage keys (per-event where the data is per-event) ----
+
+const LAST_EVENT_KEY = "sc:last-event";       // last viewed event id
+const CACHE_CALENDAR = "sc:calendar";         // calendar cache {at, value}
+const RELOAD_STATE_KEY = "sc:reloadState";    // sessionStorage deploy-reload handoff
+
+// ---- Event selection (URL is the only select/share surface) ----
+// ?choose → picker. ?event=<id> → that event. Bare URL → sc:last-event if
+// present, else picker. Invalid ?event → picker.
+
+const urlParams = new URLSearchParams(location.search);
+let eventId = null;
+if (!urlParams.has("choose")) {
+  const rawEvent = urlParams.get("event");
+  if (rawEvent !== null) {
+    if (/^\d+$/.test(rawEvent.trim())) eventId = parseInt(rawEvent.trim(), 10);
+  } else {
+    try {
+      const last = localStorage.getItem(LAST_EVENT_KEY);
+      if (last && /^\d+$/.test(last)) eventId = parseInt(last, 10);
+    } catch (e) { /* blocked storage — fall through to the picker */ }
+  }
+}
+
+// Per-event derived bindings (null in picker mode — no event polling there).
+let EVENT_URL = null;
+let SCORING_URL = null;
+let RIDERS_KEY = null;   // sc:<id>:riders — followed rider names (JSON string[])
+let CACHE_EVENT = null;  // sc:<id>:event — feed cache {at, value}
+let CACHE_SCORING = null;// sc:<id>:scoring — scoring cache {at, value}
+if (eventId !== null) {
+  EVENT_URL = `${API_BASE}/${eventId}`;
+  SCORING_URL = `${EVENT_URL}/scoringLive`;
+  RIDERS_KEY = `sc:${eventId}:riders`;
+  CACHE_EVENT = `sc:${eventId}:event`;
+  CACHE_SCORING = `sc:${eventId}:scoring`;
+}
+
+// ---- Maintainer config resolution ----
+// EVENT_CONFIGS[eventId] resolves into the same mutable bindings the rest of
+// the code (and the tests, via page.evaluate) uses: DELAYS / DELAY_DATE /
+// EXTRAS / OVERRIDE_IDX / EST_IDX. Assigned once at startup — the event id
+// is fixed per page load.
+
+let DELAY_DATE = "";
+let DELAYS = {};
+let EXTRAS = [];
+// Overrides and estimates indexed by pinny+phase. All object indexes keyed
+// by feed strings are built null-prototyped (Object.create(null)) so a
+// value literally named "constructor"/"toString"/"__proto__" can never
+// resolve to an inherited function.
+let OVERRIDE_IDX = Object.create(null);
+let EST_IDX = Object.create(null);
+{
+  const cfg = (eventId !== null && Object.hasOwn(EVENT_CONFIGS, eventId))
+    ? EVENT_CONFIGS[eventId] : {};
+  if (typeof cfg.delayDate === "string") DELAY_DATE = cfg.delayDate;
+  if (cfg.delays && typeof cfg.delays === "object") DELAYS = cfg.delays;
+  if (Array.isArray(cfg.extras)) EXTRAS = cfg.extras;
+  for (const o of Array.isArray(cfg.overrides) ? cfg.overrides : []) {
+    const when = parseConfigTime(o);
+    if (when) OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = when;
+  }
+  for (const o of Array.isArray(cfg.estimates) ? cfg.estimates : []) {
+    const when = parseConfigTime(o);
+    if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
+  }
+}
+
+// ---- Timezone derivation ----
+// The feeds carry no timezone anywhere; addresses/locations end in a US
+// state name ("…, Kalispell, Montana"). Map the state to its primary IANA
+// zone (split-zone states use the majority zone — a heuristic, but strictly
+// better than assuming any fixed zone). Fallback: the device's zone.
+
+const STATE_TZ = {
+  "alabama": "America/Chicago", "alaska": "America/Anchorage",
+  "arizona": "America/Phoenix", "arkansas": "America/Chicago",
+  "california": "America/Los_Angeles", "colorado": "America/Denver",
+  "connecticut": "America/New_York", "delaware": "America/New_York",
+  "florida": "America/New_York", "georgia": "America/New_York",
+  "hawaii": "Pacific/Honolulu", "idaho": "America/Denver",
+  "illinois": "America/Chicago", "indiana": "America/New_York",
+  "iowa": "America/Chicago", "kansas": "America/Chicago",
+  "kentucky": "America/New_York", "louisiana": "America/Chicago",
+  "maine": "America/New_York", "maryland": "America/New_York",
+  "massachusetts": "America/New_York", "michigan": "America/New_York",
+  "minnesota": "America/Chicago", "mississippi": "America/Chicago",
+  "missouri": "America/Chicago", "montana": "America/Denver",
+  "nebraska": "America/Chicago", "nevada": "America/Los_Angeles",
+  "new hampshire": "America/New_York", "new jersey": "America/New_York",
+  "new mexico": "America/Denver", "new york": "America/New_York",
+  "north carolina": "America/New_York", "north dakota": "America/Chicago",
+  "ohio": "America/New_York", "oklahoma": "America/Chicago",
+  "oregon": "America/Los_Angeles", "pennsylvania": "America/New_York",
+  "rhode island": "America/New_York", "south carolina": "America/New_York",
+  "south dakota": "America/Chicago", "tennessee": "America/Chicago",
+  "texas": "America/Chicago", "utah": "America/Denver",
+  "vermont": "America/New_York", "virginia": "America/New_York",
+  "washington": "America/Los_Angeles", "west virginia": "America/New_York",
+  "wisconsin": "America/Chicago", "wyoming": "America/Denver",
+  "district of columbia": "America/New_York", "washington dc": "America/New_York",
+  "dc": "America/New_York", "d.c": "America/New_York",
+};
+
+// Scan comma-separated segments last-to-first ("…, Kalispell, Montana 59901"
+// → "montana") across the given candidate strings; first state hit wins.
+function deriveTz(...candidates) {
+  for (const c of candidates) {
+    if (typeof c !== "string" || !c.trim()) continue;
+    const segs = c.split(",");
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const seg = segs[i].trim().toLowerCase()
+        .replace(/[\s\d-]+$/, "")   // trailing zip / stray digits
+        .replace(/[.\s]+$/, "");    // trailing dots ("D.C.")
+      if (Object.hasOwn(STATE_TZ, seg)) return STATE_TZ[seg];
+    }
+  }
+  return null;
+}
+
+// Short zone name ("MDT") for footer copy; empty string if Intl balks.
+function tzShortName(tz) {
+  try {
+    for (const p of new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" })
+      .formatToParts(new Date())) {
+      if (p.type === "timeZoneName") return p.value;
+    }
+  } catch (e) { /* bad zone id — no short name */ }
+  return "";
+}
+
+// Event-local zone, refined from the feed/calendar once they load.
+let eventTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // ---- Feed parsing (kept isolated: the API is unofficial and may change) ----
 
@@ -287,7 +475,7 @@ function parseRideTime(s) {
 function eventLocalNow() {
   const p = {};
   for (const part of new Intl.DateTimeFormat("en-US", {
-    timeZone: EVENT_TZ, year: "numeric", month: "numeric", day: "numeric",
+    timeZone: eventTz, year: "numeric", month: "numeric", day: "numeric",
     hour: "numeric", minute: "numeric", second: "numeric", hour12: false,
   }).formatToParts(new Date())) p[part.type] = +part.value;
   return new Date(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
@@ -295,6 +483,7 @@ function eventLocalNow() {
 
 // Parse a config {date: "2026-07-17", time: "4:40 PM"} to a wall-clock Date.
 function parseConfigTime(o) {
+  if (!o || typeof o.date !== "string" || typeof o.time !== "string") return null;
   const [y, mo, d] = o.date.split("-").map(Number);
   const t = /^(\d+):(\d+)\s*(AM|PM)$/i.exec(o.time.trim());
   if (!t) return null;
@@ -303,40 +492,18 @@ function parseConfigTime(o) {
   return new Date(y, mo - 1, d, h, +t[2], 0);
 }
 
-// Overrides and estimates indexed by pinny+phase. All object indexes keyed
-// by feed strings are built null-prototyped (Object.create(null)) so a
-// value literally named "constructor"/"toString"/"__proto__" can never
-// resolve to an inherited function.
-const OVERRIDE_IDX = Object.create(null);
-for (const o of OVERRIDES) {
-  const when = parseConfigTime(o);
-  if (when) OVERRIDE_IDX[`${o.pinny}|${o.phase}`] = when;
-}
-const EST_IDX = Object.create(null);
-for (const o of ESTIMATES) {
-  const when = parseConfigTime(o);
-  if (when) EST_IDX[`${o.pinny}|${o.phase}`] = { when, note: o.note };
-}
-
-// Per-browser edits to the follow list. FOLLOWING is just the pre-populated
-// default: additions and removals are both stored locally, so each phone
-// can shape its own list while shared-list updates still flow through.
-const MY_RIDERS_KEY = "rf2026:myRiders";
-const HIDDEN_RIDERS_KEY = "rf2026:hiddenRiders";
+// Followed riders are chosen entirely in-app and stored per event.
 function getStoredList(key) {
   // Array.isArray guard: valid-but-wrong-shape JSON (e.g. written by another
-  // tool on this origin) must degrade to the baked list, not crash callers
+  // tool on this origin) must degrade to an empty list, not crash callers
   // that spread/iterate the result.
   try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; } catch (e) { return []; }
 }
 function setStoredList(key, list) {
   try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) { /* blocked */ }
 }
-const getMyRiders = () => getStoredList(MY_RIDERS_KEY);
-const getHiddenRiders = () => getStoredList(HIDDEN_RIDERS_KEY);
 function effectiveFollowing() {
-  const hidden = new Set(getHiddenRiders());
-  return [...FOLLOWING.filter(n => !hidden.has(n)), ...getMyRiders()];
+  return RIDERS_KEY ? getStoredList(RIDERS_KEY) : [];
 }
 
 // All accepted riders in the feed, for the "my riders" search picker.
@@ -427,17 +594,19 @@ let resultsIdx = Object.create(null);
 let selectedDay = null;   // dayKey chosen by the user; null = auto
 let lastUpdatedMs = null; // epoch ms of last good event fetch (or cache stamp)
 let lastFeed = null;      // last good feed, for re-filtering after my-riders edits
-let followedCount = FOLLOWING.length;
+let followedCount = 0;
 let matchedNames = null;  // followed names that matched ≥1 accepted entry (null = no feed yet)
 let scoringByDiv = Object.create(null); // DivisionName -> scoring rows, for slot estimates
 let divMeta = Object.create(null);      // DivisionName -> { phaseOrder }, e.g. "d-xc-sj"
 let sjBlockDivs = new Set(); // divisions whose SJ time is a shared block start
+let calendarEvents = [];  // sanitized calendar entries for the picker
+let calendarError = false;
+let pendingSharedRiders = null; // ?riders= names awaiting a banner decision
 
 // Last good payloads survive reloads on bad signal (spotty venue cell
 // service): render cached data instantly, stamped with its age, while
-// fetches retry in the background.
-const CACHE_EVENT = "rf2026:event";
-const CACHE_SCORING = "rf2026:scoring";
+// fetches retry in the background. Keys are per-event so a cache from
+// another event can never hydrate this one.
 // Serialized payload of the last successful write per key: identical polls
 // (the common case) skip the ~1 MB synchronous rewrite entirely. The blob's
 // `at` stamp therefore only moves when content changes; freshness display
@@ -456,8 +625,22 @@ function cachePut(key, value) {
 function cacheGet(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
 }
+// Quota hygiene: this page only ever needs the current event's feed caches.
+// Every event's :riders list is kept (small, precious); other events'
+// :event/:scoring blobs (large, refetchable) are dropped.
+function evictOtherEventCaches() {
+  try {
+    const doomed = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (/^sc:\d+:(event|scoring)$/.test(k) && k !== CACHE_EVENT && k !== CACHE_SCORING)
+        doomed.push(k);
+    }
+    for (const k of doomed) localStorage.removeItem(k);
+  } catch (e) { /* blocked storage */ }
+}
 function clockInEventTz(ms) {
-  return new Intl.DateTimeFormat("en-US", { timeZone: EVENT_TZ, hour: "numeric", minute: "2-digit" }).format(new Date(ms));
+  return new Intl.DateTimeFormat("en-US", { timeZone: eventTz, hour: "numeric", minute: "2-digit" }).format(new Date(ms));
 }
 
 function isoDay(d) {
@@ -612,8 +795,8 @@ function adjustedTime(ride) {
   if (ride.override) {
     return { adj: ride.override, delayMin: 0, revised: +ride.override !== +ride.when };
   }
-  // DELAYS is a user-edited config literal: guard the venue-keyed read so a
-  // venue named like an Object.prototype member (or a typo'd non-number
+  // DELAYS is a maintainer-edited config literal: guard the venue-keyed read
+  // so a venue named like an Object.prototype member (or a typo'd non-number
   // value) yields 0 rather than an inherited function.
   const raw = ride.dayKey === DELAY_DATE && Object.hasOwn(DELAYS, ride.venue)
     ? DELAYS[ride.venue] : 0;
@@ -671,6 +854,30 @@ function popoverHTML(ride, adj, delayMin) {
 function render() {
   const now = eventLocalNow();
   const todayKey = isoDay(now);
+  const list = document.getElementById("list");
+
+  // Empty follow state: no baked list exists anymore, so a fresh browser
+  // follows nobody — prompt instead of rendering an empty timeline.
+  const followingNow = effectiveFollowing();
+  if (followingNow.length === 0) {
+    document.getElementById("days").innerHTML = "";
+    document.getElementById("delay-banner").hidden = true;
+    list.innerHTML = `<div class="empty">No riders followed yet.<br>
+      Pick the riders you want to track — the list is saved on this phone.<br><br>
+      <button id="add-riders-btn" class="rbtn add">Add riders to follow</button></div>`;
+    document.getElementById("add-riders-btn").onclick = () => {
+      document.getElementById("rider-sheet").hidden = false;
+      renderRiderSheet();
+    };
+    document.getElementById("status").textContent = lastUpdatedMs
+      ? `Updated ${clockInEventTz(lastUpdatedMs)} · no riders followed yet`
+      : "";
+    // This render consumed the one-shot landing too (mirrors the no-rows
+    // branch below): the scroll-to-now must not fire later.
+    if (lastUpdatedMs !== null) initialScrollDone = true;
+    updateNowBtn();
+    return;
+  }
 
   // Day chips: every day that has followed rides OR an extras item, in
   // order — an EXTRAS entry on a rest day must still be reachable.
@@ -717,7 +924,6 @@ function render() {
   }
   dayRides.sort((a, b) => a.adj - b.adj);
 
-  const list = document.getElementById("list");
   // Rebuilding #list innerHTML would silently drop a pinned popover (polls
   // re-render up to every 20 s): remember the pinned row's identity
   // (pinny|phase|dayKey, its data-key) and re-apply the pin afterwards.
@@ -877,8 +1083,9 @@ function render() {
   let statusText = "";
   if (lastUpdatedMs) {
     const ageMin = Math.round((Date.now() - lastUpdatedMs) / 60_000);
-    // Count riders actually found in the feed, so a typo'd FOLLOWING entry
-    // is visible as "M of N riders found" instead of silently inflating N.
+    // Count riders actually found in the feed, so a typo'd or ghost-shared
+    // name is visible as "M of N riders found" instead of silently
+    // inflating N.
     const found = matchedNames ? matchedNames.size : followedCount;
     const followNote = found < followedCount
       ? `${found} of ${followedCount} riders found`
@@ -888,6 +1095,38 @@ function render() {
       : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followNote}`;
   }
   document.getElementById("status").textContent = statusText;
+}
+
+// ---- Event identity (name, title, footer timezone) ----
+
+function setEventName(name) {
+  const clean = typeof name === "string" && name.trim() ? name.trim() : "";
+  document.getElementById("event-name").textContent = clean || "Ride Times";
+  document.title = clean ? `${clean} — Ride Times` : "Ride Times";
+}
+
+function updateFooter() {
+  const short = tzShortName(eventTz);
+  document.querySelector("footer").textContent =
+    `Times are event-local${short ? ` (${short})` : ""}. Tap a ride for details.`;
+}
+
+// The calendar cache entry for this event, if any — used for the header
+// name before the feed loads and as a tz-derivation fallback.
+let calendarEntry = null;
+
+// Called on every good feed (fetched or cached): refresh the event name and
+// derive the event timezone from its address/location strings.
+function applyFeedIdentity(feed) {
+  const det = (feed && typeof feed === "object" && feed.EventDetails
+    && typeof feed.EventDetails === "object") ? feed.EventDetails : null;
+  if (det && typeof det.EventName === "string" && det.EventName.trim()) {
+    setEventName(det.EventName);
+  }
+  const tz = deriveTz(det && det.EventAddress, det && det.EventLocation,
+    calendarEntry && calendarEntry.location);
+  if (tz) eventTz = tz;
+  updateFooter();
 }
 
 // ---- Polling (fail-soft: keep showing the last good data on errors) ----
@@ -907,7 +1146,7 @@ function fetchTimeoutSignal() {
 
 let eventFetchInFlight = false;
 async function fetchEventFeed() {
-  if (eventFetchInFlight) return;
+  if (!EVENT_URL || eventFetchInFlight) return;
   eventFetchInFlight = true;
   try {
     const resp = await fetch(EVENT_URL, { signal: fetchTimeoutSignal() });
@@ -917,7 +1156,9 @@ async function fetchEventFeed() {
     buildRiderIndex(feed);
     rides = extractRides(feed);
     lastUpdatedMs = Date.now();
+    applyFeedIdentity(feed);
     cachePut(CACHE_EVENT, feed);
+    evictOtherEventCaches();
     document.getElementById("fetch-err").textContent = "";
   } catch (e) {
     // Timeouts land here too: a hung network shows the same retry note.
@@ -930,7 +1171,7 @@ async function fetchEventFeed() {
 
 let scoringFetchInFlight = false;
 async function fetchScoring() {
-  if (scoringFetchInFlight) return;
+  if (!SCORING_URL || scoringFetchInFlight) return;
   scoringFetchInFlight = true;
   try {
     const resp = await fetch(SCORING_URL, { signal: fetchTimeoutSignal() });
@@ -943,51 +1184,10 @@ async function fetchScoring() {
   finally { scoringFetchInFlight = false; }
 }
 
-// State handed over by the deploy auto-reload (see checkForNewDeploy):
-// restore the selected day before the first render and the scroll offset at
-// the first render of rows, and suppress the one-time scroll-to-now landing
-// so the reload puts the user back exactly where they were. Only a fresh
-// stamp counts — stale state (>2 min, e.g. a crashed reload from earlier)
-// is discarded and the load behaves like a normal one. The key is consumed
-// (removed) either way; normal loads without the key are unaffected.
-const RELOAD_STATE_KEY = "rf2026:reloadState";
-let restoreScrollY = null;
-try {
-  const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
-  if (raw) {
-    sessionStorage.removeItem(RELOAD_STATE_KEY);
-    const st = JSON.parse(raw);
-    if (st && typeof st.at === "number" && Date.now() - st.at < 2 * 60_000) {
-      if (st.selectedDay) selectedDay = st.selectedDay;
-      if (typeof st.scrollY === "number") restoreScrollY = st.scrollY;
-      initialScrollDone = true; // no scroll-to-now landing on a state-restoring reload
-    }
-  }
-} catch (e) { /* blocked/corrupt storage — behave like a normal load */ }
-
-// Hydrate from cache so the page is useful immediately, even fully offline.
-// Guarded: a cache blob of the wrong shape (older app version, corrupted
-// storage) must never throw here — an uncaught top-level error would stop
-// the script before the fetch calls and listeners below ever run.
-try {
-  const ev = cacheGet(CACHE_EVENT);
-  if (ev && ev.value) {
-    lastFeed = ev.value;
-    buildRiderIndex(ev.value);
-    rides = extractRides(ev.value);
-    lastUpdatedMs = ev.at;
-  }
-  const sc = cacheGet(CACHE_SCORING);
-  if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
-  if (rides.length) render();
-} catch (e) {
-  lastFeed = null; rides = []; resultsIdx = Object.create(null); lastUpdatedMs = null;
-}
-
 // ---- Auto-reload on redeploy ----
 // Polls this page's own URL and reloads when the deployed bytes change, so
-// delay/follow-list edits reach open phones within a minute of deploy —
-// no separate signal file to maintain, any commit to the page is the signal.
+// delay/config edits reach open phones within a minute of deploy — no
+// separate signal file to maintain, any commit to the page is the signal.
 let deployBaseline = null;
 let deployFetchInFlight = false;
 async function checkForNewDeploy() {
@@ -1002,9 +1202,10 @@ async function checkForNewDeploy() {
     else if (text !== deployBaseline) {
       // Hand the UI state to the post-reload page so a pushed config edit
       // doesn't yank the user back to the top of "today" (REVIEW #1).
+      // Stamped with the event id: state from another event must not apply.
       try {
         sessionStorage.setItem(RELOAD_STATE_KEY, JSON.stringify({
-          at: Date.now(), selectedDay, scrollY: window.scrollY,
+          at: Date.now(), eventId, selectedDay, scrollY: window.scrollY,
         }));
       } catch (err) { /* blocked storage — reload without state */ }
       location.reload();
@@ -1013,19 +1214,213 @@ async function checkForNewDeploy() {
   finally { deployFetchInFlight = false; }
 }
 
+// ---- Event picker (calendar view) ----
+
+// Degenerate payloads (null, non-array, entries missing fields) must never
+// throw: reduce whatever arrives to a clean list of well-typed entries.
+function sanitizeCalendar(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const e of v) {
+    if (!e || typeof e !== "object") continue;
+    const idRaw = e.ShowConnectId;
+    const id = typeof idRaw === "number" && isFinite(idRaw) ? idRaw
+      : (typeof idRaw === "string" && /^\d+$/.test(idRaw) ? parseInt(idRaw, 10) : null);
+    if (id === null) continue;
+    out.push({
+      id,
+      name: typeof e.EventName === "string" && e.EventName ? e.EventName : `Event ${id}`,
+      date: typeof e.EventDate === "string" ? e.EventDate : "",
+      location: typeof e.EventLocation === "string" ? e.EventLocation : "",
+      // 1 = happening now, 2 = upcoming (sorted asc), 3 = past (recent first)
+      pos: e.CalendarPosition === 1 || e.CalendarPosition === 2 ? e.CalendarPosition : 3,
+      entries: e.PublishEntryList !== false,
+    });
+  }
+  return out;
+}
+
+function calendarEntryFor(id) {
+  const c = cacheGet(CACHE_CALENDAR);
+  const list = sanitizeCalendar(c && c.value);
+  for (const e of list) if (e.id === id) return e;
+  return null;
+}
+
+// The calendar endpoint can be slow/flaky (observed 90s+ hangs): same 10 s
+// abort + in-flight guard as the other fetches, cache with a 6 h TTL, and
+// never clobber a good cached list with a degenerate response.
+let calendarFetchInFlight = false;
+async function fetchCalendar() {
+  if (calendarFetchInFlight) return;
+  calendarFetchInFlight = true;
+  try {
+    const resp = await fetch(CALENDAR_URL, { signal: fetchTimeoutSignal() });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const list = sanitizeCalendar(data);
+    if (list.length) {
+      calendarEvents = list;
+      cachePut(CACHE_CALENDAR, data);
+    }
+    calendarError = !list.length && !calendarEvents.length;
+  } catch (e) {
+    calendarError = true; // manual entry below still works
+  } finally {
+    calendarFetchInFlight = false;
+  }
+  renderPicker();
+}
+
+// Accepts a bare numeric ShowConnectId or a pasted showconnect.org URL
+// containing ShowConnectId=NNN; null if neither.
+function parseManualEvent(s) {
+  const t = String(s == null ? "" : s).trim();
+  if (/^\d+$/.test(t)) return parseInt(t, 10);
+  const m = /ShowConnectId=(\d+)/i.exec(t);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+const RECENT_CAP = 15; // uncapped while searching
+
+function renderPicker() {
+  const pickerEl = document.getElementById("picker");
+  if (pickerEl.hidden) return; // event view is up — nothing to draw
+  const q = document.getElementById("picker-search").value.trim().toLowerCase();
+  const match = e => !q || e.name.toLowerCase().includes(q) || e.location.toLowerCase().includes(q);
+  const rowHTML = e => `
+    <div class="erow" data-id="${e.id}">
+      <div class="ename">${esc(e.name)}</div>
+      <div class="emeta">${esc([e.date, e.location].filter(Boolean).join(" · "))}</div>
+      ${e.entries ? "" : `<div class="enote">entries not published yet</div>`}
+    </div>`;
+  const sections = [
+    ["Happening now", 1, Infinity],
+    ["Upcoming", 2, Infinity],
+    ["Recent", 3, q ? Infinity : RECENT_CAP], // rest reachable via search
+  ];
+  let html = "";
+  for (const [label, pos, cap] of sections) {
+    const evs = calendarEvents.filter(e => e.pos === pos && match(e)).slice(0, cap);
+    if (!evs.length) continue;
+    html += `<div class="psec">${label}</div>` + evs.map(rowHTML).join("");
+  }
+  if (!html) {
+    html = `<div class="empty">${calendarEvents.length ? "No events match."
+      : calendarFetchInFlight ? "Loading events…" : "No events loaded."}</div>`;
+  }
+  const listEl = document.getElementById("picker-list");
+  listEl.innerHTML = html;
+  for (const el of listEl.querySelectorAll(".erow")) {
+    // Full navigation on purpose: clean state, working back button.
+    el.onclick = () => { location.href = "?event=" + el.dataset.id; };
+  }
+  const errEl = document.getElementById("picker-err");
+  errEl.hidden = !calendarError;
+  errEl.textContent = calendarError
+    ? (calendarEvents.length
+      ? "Can't reach the ShowConnect calendar — showing a saved list."
+      : "Can't reach the ShowConnect calendar — you can still enter an event ID below.")
+    : "";
+}
+
+function goToManualEvent() {
+  const id = parseManualEvent(document.getElementById("picker-manual").value);
+  const errEl = document.getElementById("manual-err");
+  if (id === null) {
+    errEl.textContent = "Enter a numeric ShowConnectId or a showconnect.org link.";
+    errEl.hidden = false;
+    return;
+  }
+  errEl.hidden = true;
+  location.href = "?event=" + id;
+}
+
+document.getElementById("picker-search").addEventListener("input", renderPicker);
+document.getElementById("picker-go").addEventListener("click", goToManualEvent);
+document.getElementById("picker-manual").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") goToManualEvent();
+});
+
+// ---- Share via link (?event=<id>&riders=<name1|name2|…>) ----
+
+function buildShareUrl() {
+  const names = effectiveFollowing();
+  const base = location.protocol.startsWith("http")
+    ? location.origin + location.pathname
+    : location.href.split("?")[0];
+  return `${base}?event=${eventId}&riders=${encodeURIComponent(names.join("|"))}`;
+}
+
+// Normalize the URL to the canonical ?event=<id> (drops riders/choose junk;
+// also upgrades a bare last-event load to an addressable URL).
+function cleanEventUrl() {
+  try { history.replaceState(null, "", location.pathname + "?event=" + eventId); }
+  catch (e) { /* some embedded contexts block replaceState */ }
+}
+
+// Receiving a shared list: empty stored list adopts silently; a differing
+// stored list gets a banner (Add to mine / Replace mine / Ignore). Every
+// path ends with the URL cleaned. Shared names not in the feed behave like
+// any ghost follow ("no entries found" in the sheet).
+function handleSharedRiders() {
+  const raw = urlParams.get("riders"); // already percent-decoded
+  if (raw === null) { cleanEventUrl(); return; }
+  const names = raw.split("|").map(s => s.trim()).filter(Boolean);
+  if (!names.length) { cleanEventUrl(); return; }
+  const stored = effectiveFollowing();
+  if (stored.length === 0) {
+    setStoredList(RIDERS_KEY, names);
+    cleanEventUrl();
+    return;
+  }
+  const same = stored.length === names.length && names.every(n => stored.includes(n));
+  if (same) { cleanEventUrl(); return; }
+  pendingSharedRiders = names;
+  document.getElementById("share-banner-text").innerHTML =
+    `This link shares <b>${names.length} rider${names.length === 1 ? "" : "s"}</b> for this event.`;
+  document.getElementById("share-banner").hidden = false;
+}
+
+function resolveSharedRiders(mode) {
+  const names = pendingSharedRiders || [];
+  if (mode === "add") {
+    const mine = effectiveFollowing();
+    setStoredList(RIDERS_KEY, [...mine, ...names.filter(n => !mine.includes(n))]);
+  } else if (mode === "replace") {
+    setStoredList(RIDERS_KEY, names);
+  } // "ignore" just cleans up
+  pendingSharedRiders = null;
+  document.getElementById("share-banner").hidden = true;
+  cleanEventUrl();
+  if (lastFeed) rides = extractRides(lastFeed);
+  render();
+}
+document.getElementById("share-adopt-add").addEventListener("click", () => resolveSharedRiders("add"));
+document.getElementById("share-adopt-replace").addEventListener("click", () => resolveSharedRiders("replace"));
+document.getElementById("share-adopt-ignore").addEventListener("click", () => resolveSharedRiders("ignore"));
+
 // ---- "My riders" picker sheet ----
 
 function renderRiderSheet() {
   const current = effectiveFollowing();
-  // Flag names that matched nothing in the loaded feed (typos, withdrawals).
+  // Flag names that matched nothing in the loaded feed (typos, withdrawals,
+  // ghost names from a shared link).
   const noMatch = n => matchedNames && !matchedNames.has(n)
     ? `<small> · no entries found</small>` : "";
-  document.getElementById("my-riders-list").innerHTML = (current.length
+  document.getElementById("my-riders-list").innerHTML = current.length
     ? current.map(n => `<div class="rrow"><span>${esc(n)}${noMatch(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
-    : `<div class="sheet-sub">Not following anyone — search below to add.</div>`)
-    + (getHiddenRiders().length
-    ? `<div class="sheet-sub">Removed: ${esc(getHiddenRiders().join("; "))} · <button class="linklike" id="restore-shared">restore</button></div>`
-    : "");
+    : `<div class="sheet-sub">Not following anyone yet — search below to add.</div>`;
+  // Share row: only useful with ≥1 rider to share.
+  const shareRow = document.getElementById("share-row");
+  shareRow.hidden = current.length === 0;
+  if (!shareRow.hidden) {
+    const url = buildShareUrl();
+    document.getElementById("share-native").hidden =
+      !(typeof navigator !== "undefined" && navigator.share);
+    document.getElementById("share-sms").href = "sms:?&body=" + encodeURIComponent(url);
+    document.getElementById("share-copied").hidden = true;
+  }
   const q = document.getElementById("rider-search").value.trim().toLowerCase();
   const resEl = document.getElementById("rider-results");
   if (q.length < 2) { resEl.innerHTML = ""; return; }
@@ -1050,28 +1445,45 @@ document.getElementById("sheet-close").addEventListener("click", () => {
 });
 document.getElementById("rider-sheet").addEventListener("click", ev => {
   if (ev.target.id === "rider-sheet") { ev.currentTarget.hidden = true; return; } // backdrop tap
-  if (ev.target.id === "restore-shared") {
-    setStoredList(HIDDEN_RIDERS_KEY, []);
+  const btn = ev.target.closest(".rbtn");
+  if (!btn || !btn.dataset.n) return; // share-row buttons carry no rider name
+  const name = btn.dataset.n;
+  const mine = effectiveFollowing();
+  if (btn.classList.contains("add")) {
+    if (!mine.includes(name)) setStoredList(RIDERS_KEY, [...mine, name]);
   } else {
-    const btn = ev.target.closest(".rbtn");
-    if (!btn) return;
-    const name = btn.dataset.n;
-    const mine = getMyRiders(), hidden = getHiddenRiders();
-    if (btn.classList.contains("add")) {
-      // Re-adding a hidden shared rider un-hides it; otherwise it's a personal add.
-      if (hidden.includes(name)) setStoredList(HIDDEN_RIDERS_KEY, hidden.filter(n => n !== name));
-      else if (!mine.includes(name)) setStoredList(MY_RIDERS_KEY, [...mine, name]);
-    } else {
-      // Removing: personal adds are deleted; shared riders are hidden locally.
-      if (mine.includes(name)) setStoredList(MY_RIDERS_KEY, mine.filter(n => n !== name));
-      else if (!hidden.includes(name)) setStoredList(HIDDEN_RIDERS_KEY, [...hidden, name]);
-    }
+    setStoredList(RIDERS_KEY, mine.filter(n => n !== name));
   }
   if (lastFeed) rides = extractRides(lastFeed);
   renderRiderSheet();
   render();
 });
 document.getElementById("rider-search").addEventListener("input", renderRiderSheet);
+
+// Share actions. navigator.share is the primary (mobile share sheet →
+// Messages); sms: link and clipboard copy are the always-present fallbacks.
+document.getElementById("share-native").addEventListener("click", () => {
+  if (!navigator.share) return;
+  const name = document.getElementById("event-name").textContent;
+  navigator.share({ title: `${name} — riders`, url: buildShareUrl() }).catch(() => {});
+});
+document.getElementById("share-copy").addEventListener("click", async () => {
+  const url = buildShareUrl();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(url);
+      const tag = document.getElementById("share-copied");
+      tag.hidden = false;
+      setTimeout(() => { tag.hidden = true; }, 2000);
+      return;
+    } catch (e) { /* fall through to prompt */ }
+  }
+  prompt("Copy this link:", url);
+});
+
+document.getElementById("switch-event").addEventListener("click", () => {
+  location.href = "?choose";
+});
 
 document.getElementById("now-btn").addEventListener("click", () => {
   const el = document.querySelector(".now-line");
@@ -1083,13 +1495,110 @@ document.getElementById("now-btn").addEventListener("click", () => {
 });
 window.addEventListener("scroll", updateNowBtn, { passive: true });
 
-fetchEventFeed();
-fetchScoring();
-checkForNewDeploy();
-setInterval(fetchEventFeed, EVENT_POLL_MS);
-setInterval(fetchScoring, SCORING_POLL_MS);
-setInterval(checkForNewDeploy, DEPLOY_POLL_MS);
-setInterval(render, 30_000); // keep countdowns fresh between fetches
+// ---- Boot ----
+
+// Legacy single-event keys: rf2026:myRiders migrates (below); the big feed
+// caches are just freed.
+try { localStorage.removeItem("rf2026:event"); localStorage.removeItem("rf2026:scoring"); } catch (e) {}
+
+let restoreScrollY = null;
+
+if (eventId !== null) {
+  // ---- Event view ----
+  try { localStorage.setItem(LAST_EVENT_KEY, String(eventId)); } catch (e) {}
+
+  // One-time migration from the single-event era: personal adds from the
+  // rf2026 deployment become event 1187's follow list (the old baked-in
+  // default names are intentionally NOT imported).
+  if (eventId === 1187) {
+    try {
+      if (localStorage.getItem(RIDERS_KEY) === null) {
+        const legacy = JSON.parse(localStorage.getItem("rf2026:myRiders"));
+        if (Array.isArray(legacy))
+          setStoredList(RIDERS_KEY, legacy.filter(n => typeof n === "string"));
+      }
+    } catch (e) { /* corrupt legacy value — start empty */ }
+  }
+
+  // Header/title from the calendar cache until the feed answers; footer tz
+  // starts as the device zone and refines when the feed loads.
+  calendarEntry = calendarEntryFor(eventId);
+  setEventName(calendarEntry && calendarEntry.name);
+  updateFooter();
+
+  // State handed over by the deploy auto-reload (see checkForNewDeploy):
+  // restore the selected day before the first render and the scroll offset
+  // at the first render of rows, and suppress the one-time scroll-to-now
+  // landing so the reload puts the user back exactly where they were. Only
+  // a fresh stamp for THIS event counts — stale state (>2 min) or another
+  // event's state is discarded and the load behaves like a normal one. The
+  // key is consumed (removed) either way.
+  try {
+    const raw = sessionStorage.getItem(RELOAD_STATE_KEY);
+    if (raw) {
+      sessionStorage.removeItem(RELOAD_STATE_KEY);
+      const st = JSON.parse(raw);
+      if (st && typeof st.at === "number" && Date.now() - st.at < 2 * 60_000
+          && st.eventId === eventId) {
+        if (st.selectedDay) selectedDay = st.selectedDay;
+        if (typeof st.scrollY === "number") restoreScrollY = st.scrollY;
+        initialScrollDone = true; // no scroll-to-now landing on a state-restoring reload
+      }
+    }
+  } catch (e) { /* blocked/corrupt storage — behave like a normal load */ }
+
+  // Shared rider list in the URL: adopt/merge/ignore, then canonicalize the
+  // URL to ?event=<id> (also normalizes a bare last-event load).
+  handleSharedRiders();
+
+  // Hydrate from cache so the page is useful immediately, even fully
+  // offline. Guarded: a cache blob of the wrong shape (older app version,
+  // corrupted storage) must never throw here — an uncaught top-level error
+  // would stop the script before the fetch calls below ever run.
+  try {
+    const ev = cacheGet(CACHE_EVENT);
+    if (ev && ev.value) {
+      lastFeed = ev.value;
+      buildRiderIndex(ev.value);
+      rides = extractRides(ev.value);
+      lastUpdatedMs = ev.at;
+      applyFeedIdentity(ev.value);
+    }
+    const sc = cacheGet(CACHE_SCORING);
+    if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
+    if (rides.length) render();
+  } catch (e) {
+    lastFeed = null; rides = []; resultsIdx = Object.create(null); lastUpdatedMs = null;
+  }
+
+  // With nobody followed, show the add-riders prompt right away instead of
+  // the loading placeholder.
+  if (effectiveFollowing().length === 0) render();
+
+  fetchEventFeed();
+  fetchScoring();
+  checkForNewDeploy();
+  setInterval(fetchEventFeed, EVENT_POLL_MS);
+  setInterval(fetchScoring, SCORING_POLL_MS);
+  setInterval(checkForNewDeploy, DEPLOY_POLL_MS);
+  setInterval(render, 30_000); // keep countdowns fresh between fetches
+} else {
+  // ---- Picker view ---- (no event polling here)
+  document.querySelector("header").hidden = true;
+  document.querySelector("main").hidden = true;
+  document.querySelector("footer").hidden = true;
+  document.getElementById("picker").hidden = false;
+  document.title = "Choose an event — Ride Times";
+  // Render the cached calendar immediately (even stale) and revalidate when
+  // it's missing or older than the TTL.
+  const c = cacheGet(CACHE_CALENDAR);
+  const cached = sanitizeCalendar(c && c.value);
+  if (cached.length) calendarEvents = cached;
+  const fresh = cached.length && c && typeof c.at === "number"
+    && Date.now() - c.at < CALENDAR_TTL_MS;
+  if (!fresh) fetchCalendar();
+  renderPicker();
+}
 </script>
 </body>
 </html>
