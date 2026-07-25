@@ -39,10 +39,9 @@ test('P77: buildShareUrl encodes the followed names — commas and spaces surviv
     assert.ok(r.url.includes('%2C'), 'commas percent-encoded');
     assert.ok(r.url.includes('%20'), 'spaces percent-encoded');
     assert.ok(!/[ ,|]/.test(r.url.split('riders=')[1]), 'no raw separators in the param');
-    // Round-trip exactly as the receiving side decodes it.
-    const back = decodeURIComponent(new URL(r.url).searchParams.get('riders')).split('|');
-    // (searchParams already decodes once; decodeURIComponent of the decoded
-    // string is a no-op for these names)
+    // Round-trip exactly as the receiving side decodes it: searchParams
+    // percent-decodes once, and handleSharedRiders splits on the raw value.
+    const back = new URL(r.url).searchParams.get('riders').split('|');
     assert.deepEqual(back, names, 'names survive the round-trip verbatim');
   } finally { await s.context.close(); }
 });
@@ -181,5 +180,38 @@ test('P81: shared names not in the feed behave like ghost follows — counted in
     const rows = await s.page.$$eval('#my-riders-list .rrow', els =>
       els.map(e => e.textContent.replace('Remove', '').trim()));
     assert.deepEqual(rows, ['Zook, Penelope', 'Ghost, Rider · no entries found']);
+  } finally { await s.context.close(); }
+});
+
+test('P79: a riders param without an explicit ?event is ignored — nothing adopted into the last-viewed event', async () => {
+  // A truncated or hand-edited link can lose the event param but keep
+  // riders; adopting those into whatever event was viewed last would
+  // silently plant ghost riders.
+  const s = await openPage({
+    server, feed: shareFeed(), now: NOON, riders: null,
+    localStorage: { 'sc:last-event': '1187' },
+    url: `${server.url}?riders=${encodeURIComponent('Injected, Rider')}`,
+  });
+  try {
+    assert.deepEqual(await storedRiders(s.page), [], 'nothing adopted');
+    assert.equal(await s.page.$eval('#share-banner', el => el.hidden), true, 'no banner either');
+    assert.equal(new URL(s.page.url()).search, '?event=1187', 'URL canonicalized to the resumed event');
+  } finally { await s.context.close(); }
+});
+
+test('P79: shared names adopt verbatim (no trimming) with duplicates and whitespace-only entries dropped', async () => {
+  // The feed ships names with stray whitespace and follow matching is
+  // exact, so " Zook, Penelope " must survive untrimmed; a crafted
+  // X|X link must not store X twice.
+  const raw = 'Zook, Penelope|Zook, Penelope|   |Ghost, Rider ';
+  const s = await openPage({
+    server, feed: shareFeed(), now: NOON, riders: null,
+    url: `${server.url}?event=1187&riders=${encodeURIComponent(raw)}`,
+  });
+  try {
+    assert.deepEqual(await storedRiders(s.page),
+      ['Zook, Penelope', 'Ghost, Rider '],
+      'deduped, whitespace-only dropped, trailing space kept');
+    assert.equal(new URL(s.page.url()).search, '?event=1187');
   } finally { await s.context.close(); }
 });

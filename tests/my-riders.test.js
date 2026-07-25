@@ -140,14 +140,19 @@ test('K47: search — ≥2 chars, case-insensitive, top 20, accepted only; Add a
     assert.equal(rows, 20, 'capped at top 20 of 25 matches');
 
     // Add appends exactly once; a repeated Add cannot duplicate the name
-    // (the sheet re-render flips the button to Remove, and the guarded write
-    // skips names already present).
+    // (the sheet re-render flips the button to Remove, and the handler's
+    // guard skips names already present).
     await s.page.fill('#rider-search', 'extra');
     await s.page.click('#rider-results button.rbtn.add[data-n="Extra, Rider"]');
+    // Exercise the page's own guard: inject a stale Add button (as a
+    // double-tap race would leave behind) and click through the real
+    // delegated handler.
     const after = await s.page.evaluate(() => {
-      const mine = getStoredList(RIDERS_KEY);
-      // Direct second add attempt through the same handler path:
-      if (!mine.includes('Extra, Rider')) setStoredList(RIDERS_KEY, [...mine, 'Extra, Rider']);
+      const stale = document.createElement('button');
+      stale.className = 'rbtn add';
+      stale.dataset.n = 'Extra, Rider';
+      document.getElementById('rider-results').appendChild(stale);
+      stale.click();
       return getStoredList(RIDERS_KEY);
     });
     assert.equal(after.filter(n => n === 'Extra, Rider').length, 1, 'no duplicate');

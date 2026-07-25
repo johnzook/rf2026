@@ -193,7 +193,8 @@ top-level functions directly in a browser context) or a functional test
     and results; error note "can't reach ShowConnect, retrying" appears.
 42. Status line: fresh data → `Updated H:MM · N riders followed` when
     every followed name matched at least one accepted entry in the feed,
-    or `Updated H:MM · M of N riders found` when only M of the N did;
+    or `Updated H:MM · M of N riders found` when only M of the N did
+    (singular "rider" when N is 1);
     data older than 2 min → `Showing data from H:MM (N min old)` (hours
     form past 60 min).
 43. Fetch failures never clear previously-rendered data (fail-soft);
@@ -341,12 +342,14 @@ calendar endpoint; the follow list is per-event and shareable via URL.
 Group-K items 45–48, items 7/40/42/60 and the testability notes were
 updated in place for the same refactor.
 
-66. URL scheme & boot routing: `?event=<id>` loads that event (and writes
-    `sc:last-event`); a bare URL auto-loads `sc:last-event` when present
+66. URL scheme & boot routing: `?event=<id>` loads that event (writing
+    `sc:last-event` only once its feed actually loads — item 82); a bare
+    URL auto-loads `sc:last-event` when present
     (with `history.replaceState` upgrading the URL to the canonical
     `?event=<id>`), else shows the picker; `?choose` always shows the
     picker, even with a last-event stored; an invalid `?event` value
-    (non-numeric) falls back to the picker. In picker mode the app chrome
+    (non-numeric, or numeric longer than 9 digits — parseInt would
+    round-trip it as exponent notation) falls back to the picker. In picker mode the app chrome
     (header/main/footer) is hidden, the picker shown, and the title reads
     "Choose an event — Ride Times"; in event mode the reverse. The
     header's "switch event" control navigates to `?choose`.
@@ -365,7 +368,8 @@ updated in place for the same refactor.
     (clean state, working back button) and lands in the event view.
 70. Manual entry accepts a bare numeric ShowConnectId or a pasted
     showconnect.org URL containing `ShowConnectId=NNN` (case-insensitive),
-    via the Go button or Enter; invalid input shows an inline error and
+    both bounded to 9 digits (item 66), via the Go button or Enter;
+    invalid input shows an inline error and
     stays on the picker; a subsequent valid entry navigates.
 71. Calendar caching: `sc:calendar` holds `{at, value}` with a 6 h TTL. A
     fresh cache renders without refetching; a stale cache renders
@@ -418,9 +422,14 @@ updated in place for the same refactor.
     exists and shares `{title: "<event> — riders", url}`.
 79. Receiving `?riders=` with an empty stored list adopts the shared
     names silently (persisted to `sc:<id>:riders`, rows render); a shared
-    list identical (as a set) to the stored one shows no banner. Every
-    path — including a plain `?event=` load — ends with
-    `history.replaceState` cleaning the URL to `?event=<id>`.
+    list identical (as a set) to the stored one shows no banner. Names
+    are taken verbatim — never trimmed (the feed ships strings with stray
+    whitespace and follow matching is exact) — with whitespace-only
+    entries and duplicates dropped. A riders param WITHOUT an explicit
+    `?event` (truncated/hand-edited link) is ignored outright — nothing
+    adopts into the last-viewed event. Every path — including a plain
+    `?event=` load — ends with `history.replaceState` cleaning the URL to
+    `?event=<id>`.
 80. Receiving `?riders=` with a differing stored list shows the banner
     "This link shares N rider(s) for this event" (store untouched, URL
     uncleaned while pending): "Add to mine" appends the new names deduped,
@@ -429,3 +438,12 @@ updated in place for the same refactor.
 81. Shared names not found in the feed behave exactly like any ghost
     follow: counted in "M of N riders found" and flagged
     `· no entries found` in the sheet (items 42/48/56).
+82. Unknown event id: the real API answers 200 + a JSON `null` body for
+    an id that doesn't exist — that, and an HTTP 404, both show
+    "event not found — check the id or switch event" instead of the
+    retry note; a plain network failure still shows
+    "can't reach ShowConnect, retrying". `sc:last-event` is written only
+    after a successful feed load, so a typo'd or dead id never becomes
+    the bare-URL resume target. Feed caches for other events are evicted
+    BEFORE the current event's cache is written, so a quota-full first
+    visit succeeds on its first fetch.

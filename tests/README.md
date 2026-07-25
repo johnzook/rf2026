@@ -2,7 +2,7 @@
 
 Automated Playwright suite covering every numbered behavior in
 [`../TESTPLAN.md`](../TESTPLAN.md) (items A1–O65 plus the multi-event
-section P66–P81).
+section P66–P82).
 
 ## Running
 
@@ -86,14 +86,14 @@ explicit `executablePath` — never run `playwright install`).
 | L49, N52–N53 | `misc.test.js` |
 | M50–M51 | `scroll.test.js` |
 | P66–P71 (URL routing, picker, calendar cache) | `event-picker.test.js` |
-| P72–P76 (per-event storage, migration, identity, tz, empty state) | `multi-event.test.js` |
+| P72–P76, P82 (per-event storage, migration, identity, tz, empty state, unknown ids) | `multi-event.test.js` |
 | P77–P81 (share links, `?riders=` receiving) | `share.test.js` |
 | Bug regressions (`BUG-*`) | `robustness.test.js` |
 | Edge-case hardening (`A/C/E/F/I/J/K-edge`) | `edge-cases.test.js` |
 | O55–O58 (REVIEW fixes wave 1, `R3/R4/R6/R9/R10/R11`) | `persistence` (R3), `my-riders` (R4), `lifecycle` (R6), `days` (R9), `scroll` (R10), `robustness` (R11) |
 | O59–O65 (REVIEW fixes wave 2, `R7/R1/R2/R8/R12a/R12c/R11b`) | `persistence` (R7, R1), `popover` (R2), `done-line` (R8), `lifecycle` (R12a), `scroll` (R12c), `robustness` (R11b) |
 
-All numbered items (A1–P81) are covered; none skipped. Each test name starts with the
+All numbered items (A1–P82) are covered; none skipped. Each test name starts with the
 item number(s) it covers (some tests cover two adjacent items, some items
 get several assertions across tests).
 

@@ -327,3 +327,23 @@ test('P71: degenerate calendar payloads never throw and never clobber a good cac
     assert.equal(g.page.__pageError, undefined);
   } finally { await g.context.close(); }
 });
+
+test('P66/P70: event ids are bounded to 9 digits — longer strings fall to the picker / error in place', async () => {
+  // parseInt on a 22-digit string yields exponent notation ("1e+21"),
+  // which would break storage-key round-tripping and eviction.
+  const huge = '9'.repeat(22);
+  const s = await openPicker({ server, path: `?event=${huge}` });
+  try {
+    assert.equal(await s.page.$eval('#picker', el => el.hidden), false, 'picker shown');
+  } finally { await s.context.close(); }
+
+  const m = await openPicker({ server });
+  try {
+    await m.page.fill('#picker-manual', huge);
+    await m.page.click('#picker-go');
+    assert.equal(await m.page.$eval('#manual-err', el => el.hidden), false, 'manual entry rejects it');
+    await m.page.fill('#picker-manual', `https://showconnect.org/entries?ShowConnectId=${huge}`);
+    await m.page.click('#picker-go');
+    assert.equal(await m.page.$eval('#manual-err', el => el.hidden), false, 'pasted URL rejects it too');
+  } finally { await m.context.close(); }
+});

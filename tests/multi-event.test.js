@@ -264,6 +264,42 @@ test('P76: with nobody followed, the page prompts to add riders instead of an em
     await s.page.click('#sheet-close');
     assert.ok(await rowInfo(s.page, 731), 'timeline renders after the first add');
     assert.ok((await s.page.$eval('#status', el => el.textContent))
-      .endsWith('· 1 riders followed'));
+      .endsWith('· 1 rider followed'));
+  } finally { await s.context.close(); }
+});
+
+test('P82: an unknown event id shows "event not found" (JSON-null body and HTTP 404 alike) and never becomes the resume target', async () => {
+  // The real API answers an unknown id with 200 + a JSON "null" body.
+  const s = await openPage({ server, eventId: 999, feed: null, riders: null, waitLoaded: false });
+  try {
+    await s.page.waitForFunction(() =>
+      document.getElementById('fetch-err').textContent.includes('event not found'));
+    assert.equal(await s.page.evaluate(() => localStorage.getItem('sc:last-event')), null,
+      'a bad id must not poison bare-URL resume');
+
+    // 404 takes the same path (re-route wins over the earlier stub).
+    await s.context.route('**/api/sc/event/999', r => r.fulfill({
+      status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'Not Found',
+    }));
+    await s.page.evaluate(() => { document.getElementById('fetch-err').textContent = ''; });
+    await s.page.evaluate(() => fetchEventFeed());
+    await s.page.waitForFunction(() =>
+      document.getElementById('fetch-err').textContent.includes('event not found'));
+
+    // A plain network failure still reads as a retry, not a missing event.
+    await s.context.route('**/api/sc/event/999', r => r.abort('failed'));
+    await s.page.evaluate(() => fetchEventFeed());
+    await s.page.waitForFunction(() =>
+      document.getElementById('fetch-err').textContent.includes("can't reach ShowConnect"));
+  } finally { await s.context.close(); }
+});
+
+test('P82: sc:last-event is written only after a successful feed load', async () => {
+  const s = await openPage({ server, now: denverMs(2026, 7, 18, 12, 0), feed: F.feed([
+    F.entry({ pinny: 730, rider: F.FOLLOWED.zook, details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 13, 0) })] }),
+  ]) });
+  try {
+    assert.equal(await s.page.evaluate(() => localStorage.getItem('sc:last-event')), '1187');
   } finally { await s.context.close(); }
 });

@@ -334,13 +334,15 @@ const RELOAD_STATE_KEY = "sc:reloadState";    // sessionStorage deploy-reload ha
 const urlParams = new URLSearchParams(location.search);
 let eventId = null;
 if (!urlParams.has("choose")) {
+  // Bounded to 9 digits: longer digit strings survive parseInt only as
+  // exponent notation ("1e+30"), which breaks key round-tripping.
   const rawEvent = urlParams.get("event");
   if (rawEvent !== null) {
-    if (/^\d+$/.test(rawEvent.trim())) eventId = parseInt(rawEvent.trim(), 10);
+    if (/^\d{1,9}$/.test(rawEvent.trim())) eventId = parseInt(rawEvent.trim(), 10);
   } else {
     try {
       const last = localStorage.getItem(LAST_EVENT_KEY);
-      if (last && /^\d+$/.test(last)) eventId = parseInt(last, 10);
+      if (last && /^\d{1,9}$/.test(last)) eventId = parseInt(last, 10);
     } catch (e) { /* blocked storage — fall through to the picker */ }
   }
 }
@@ -836,7 +838,7 @@ function popoverHTML(ride, adj, delayMin) {
   const timeRow = ride.revised
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(revised; sched ${fmtClock(ride.when)})</span>`
     : delayMin
-    ? `${fmtClock(adj)} <span style="color:var(--delay)">(sched ${fmtClock(ride.when)}, +${delayMin} min ${ride.venue})</span>`
+    ? `${fmtClock(adj)} <span style="color:var(--delay)">(sched ${fmtClock(ride.when)}, +${delayMin} min ${esc(ride.venue)})</span>`
     : fmtClock(ride.when);
   return `
     <div class="pop">
@@ -1088,8 +1090,8 @@ function render() {
     // inflating N.
     const found = matchedNames ? matchedNames.size : followedCount;
     const followNote = found < followedCount
-      ? `${found} of ${followedCount} riders found`
-      : `${followedCount} riders followed`;
+      ? `${found} of ${followedCount} rider${followedCount === 1 ? "" : "s"} found`
+      : `${followedCount} rider${followedCount === 1 ? "" : "s"} followed`;
     statusText = ageMin >= 2
       ? `Showing data from ${clockInEventTz(lastUpdatedMs)} (${ageMin < 60 ? ageMin + " min" : Math.round(ageMin / 60) + " h"} old)`
       : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followNote}`;
@@ -1150,19 +1152,38 @@ async function fetchEventFeed() {
   eventFetchInFlight = true;
   try {
     const resp = await fetch(EVENT_URL, { signal: fetchTimeoutSignal() });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const err = new Error(`HTTP ${resp.status}`);
+      err.badEvent = resp.status === 404;
+      throw err;
+    }
     const feed = await resp.json();
+    if (feed === null) { // a JSON "null" body is what an unknown id returns
+      const err = new Error("no such event");
+      err.badEvent = true;
+      throw err;
+    }
     lastFeed = feed;
     buildRiderIndex(feed);
     rides = extractRides(feed);
     lastUpdatedMs = Date.now();
     applyFeedIdentity(feed);
-    cachePut(CACHE_EVENT, feed);
+    // Evict before writing: on a quota-full first visit the freed space is
+    // what makes this cachePut succeed.
     evictOtherEventCaches();
+    cachePut(CACHE_EVENT, feed);
+    // Only a proven-good event becomes the bare-URL resume target. Guarded
+    // read-before-write: polls with unchanged data must not touch storage.
+    try {
+      if (localStorage.getItem(LAST_EVENT_KEY) !== String(eventId))
+        localStorage.setItem(LAST_EVENT_KEY, String(eventId));
+    } catch (e2) {}
     document.getElementById("fetch-err").textContent = "";
   } catch (e) {
     // Timeouts land here too: a hung network shows the same retry note.
-    document.getElementById("fetch-err").textContent = "· can't reach ShowConnect, retrying";
+    document.getElementById("fetch-err").textContent = e && e.badEvent
+      ? "· event not found — check the id or switch event"
+      : "· can't reach ShowConnect, retrying";
   } finally {
     eventFetchInFlight = false;
   }
@@ -1276,9 +1297,9 @@ async function fetchCalendar() {
 // containing ShowConnectId=NNN; null if neither.
 function parseManualEvent(s) {
   const t = String(s == null ? "" : s).trim();
-  if (/^\d+$/.test(t)) return parseInt(t, 10);
+  if (/^\d{1,9}$/.test(t)) return parseInt(t, 10);
   const m = /ShowConnectId=(\d+)/i.exec(t);
-  return m ? parseInt(m[1], 10) : null;
+  return m && /^\d{1,9}$/.test(m[1]) ? parseInt(m[1], 10) : null;
 }
 
 const RECENT_CAP = 15; // uncapped while searching
@@ -1366,7 +1387,13 @@ function cleanEventUrl() {
 function handleSharedRiders() {
   const raw = urlParams.get("riders"); // already percent-decoded
   if (raw === null) { cleanEventUrl(); return; }
-  const names = raw.split("|").map(s => s.trim()).filter(Boolean);
+  // A riders param without an explicit ?event (truncated or hand-edited
+  // link) must not adopt names into whatever event was viewed last.
+  if (!urlParams.has("event")) { cleanEventUrl(); return; }
+  // Names stay verbatim (the feed ships strings with stray whitespace and
+  // follow matching is exact); only whitespace-only entries and duplicates
+  // are dropped.
+  const names = [...new Set(raw.split("|").filter(s => s.trim().length))];
   if (!names.length) { cleanEventUrl(); return; }
   const stored = effectiveFollowing();
   if (stored.length === 0) {
@@ -1505,7 +1532,8 @@ let restoreScrollY = null;
 
 if (eventId !== null) {
   // ---- Event view ----
-  try { localStorage.setItem(LAST_EVENT_KEY, String(eventId)); } catch (e) {}
+  // (sc:last-event is written on the first successful feed fetch, not here:
+  // a typo'd id must not poison bare-URL resume.)
 
   // One-time migration from the single-event era: personal adds from the
   // rf2026 deployment become event 1187's follow list (the old baked-in
