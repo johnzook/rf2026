@@ -29,8 +29,8 @@ test('J40: good fetches cache both payloads with a timestamp; cache renders befo
   let cached;
   try {
     cached = await s.page.evaluate(() => ({
-      event: JSON.parse(localStorage.getItem('rf2026:event')),
-      scoring: JSON.parse(localStorage.getItem('rf2026:scoring')),
+      event: JSON.parse(localStorage.getItem('sc:1187:event')),
+      scoring: JSON.parse(localStorage.getItem('sc:1187:scoring')),
     }));
   } finally { await s.context.close(); }
   assert.equal(cached.event.at, NOON);
@@ -43,8 +43,8 @@ test('J40: good fetches cache both payloads with a timestamp; cache renders befo
   s = await openPage({
     server, now: NOON, network: 'stall',
     localStorage: {
-      'rf2026:event': cacheBlob(NOON - 60_000, simpleFeed()),
-      'rf2026:scoring': cacheBlob(NOON - 60_000, simpleScoring()),
+      'sc:1187:event': cacheBlob(NOON - 60_000, simpleFeed()),
+      'sc:1187:scoring': cacheBlob(NOON - 60_000, simpleScoring()),
     },
   });
   try {
@@ -76,7 +76,7 @@ test('R3: unchanged payloads skip the cache rewrite; changed payloads write agai
     const afterSame = await s.page.evaluate(() => ({
       writes: window.__writes.slice(),
       lastUpdatedMs,
-      cachedAt: JSON.parse(localStorage.getItem('rf2026:event')).at,
+      cachedAt: JSON.parse(localStorage.getItem('sc:1187:event')).at,
     }));
     assert.deepEqual(afterSame.writes, [], 'no writes for unchanged payloads');
     assert.equal(afterSame.lastUpdatedMs, NOON + 60_000, 'freshness still updates every fetch');
@@ -93,16 +93,16 @@ test('R3: unchanged payloads skip the cache rewrite; changed payloads write agai
     await s.page.evaluate(async ms => { window.__setNow(ms); await fetchEventFeed(); }, NOON + 120_000);
     const afterChange = await s.page.evaluate(() => ({
       writes: window.__writes.slice(),
-      cached: JSON.parse(localStorage.getItem('rf2026:event')),
+      cached: JSON.parse(localStorage.getItem('sc:1187:event')),
     }));
-    assert.deepEqual(afterChange.writes, ['rf2026:event'], 'changed payload written once');
+    assert.deepEqual(afterChange.writes, ['sc:1187:event'], 'changed payload written once');
     assert.equal(afterChange.cached.at, NOON + 120_000, 'stamp refreshed on content change');
     assert.ok(afterChange.cached.value.EntryList[0].RidingDetails[0].RideTimes.includes('3:00:00 PM'),
       'cache holds the new payload');
 
     // The identical payload again: still no further writes.
     await s.page.evaluate(() => fetchEventFeed());
-    assert.deepEqual(await s.page.evaluate(() => window.__writes), ['rf2026:event']);
+    assert.deepEqual(await s.page.evaluate(() => window.__writes), ['sc:1187:event']);
   } finally { await s.context.close(); }
 });
 
@@ -110,8 +110,8 @@ test('J41: fully offline with warm cache: rows + results render, retry note show
   const s = await openPage({
     server, now: NOON, network: 'abort',
     localStorage: {
-      'rf2026:event': cacheBlob(NOON - 30 * 60_000, simpleFeed()),
-      'rf2026:scoring': cacheBlob(NOON - 30 * 60_000, simpleScoring()),
+      'sc:1187:event': cacheBlob(NOON - 30 * 60_000, simpleFeed()),
+      'sc:1187:scoring': cacheBlob(NOON - 30 * 60_000, simpleScoring()),
     },
   });
   try {
@@ -253,7 +253,7 @@ test('R1: deploy reload restores day + scroll and suppresses the landing; stale 
       day: selectedDay,
       chip: document.querySelector('#days .day-chip.active').textContent,
       scrollY: window.scrollY,
-      keyLeft: sessionStorage.getItem('rf2026:reloadState'),
+      keyLeft: sessionStorage.getItem('sc:reloadState'),
       landingDone: initialScrollDone,
     }));
     assert.equal(r.day, '2026-07-17', 'selected day restored across the reload');
@@ -264,14 +264,14 @@ test('R1: deploy reload restores day + scroll and suppresses the landing; stale 
 
     // A stale key (>2 min old) is discarded: the load behaves normally
     // (auto day = today, now-landing fires) and the key is still cleared.
-    await s.page.evaluate(() => sessionStorage.setItem('rf2026:reloadState',
-      JSON.stringify({ at: Date.now() - 3 * 60_000, selectedDay: '2026-07-17', scrollY: 250 })));
+    await s.page.evaluate(() => sessionStorage.setItem('sc:reloadState',
+      JSON.stringify({ at: Date.now() - 3 * 60_000, eventId: 1187, selectedDay: '2026-07-17', scrollY: 250 })));
     await s.page.reload({ waitUntil: 'load' });
     await s.page.waitForFunction(() => lastUpdatedMs !== null);
     const r2 = await s.page.evaluate(() => ({
       day: selectedDay,
       chip: document.querySelector('#days .day-chip.active').textContent,
-      keyLeft: sessionStorage.getItem('rf2026:reloadState'),
+      keyLeft: sessionStorage.getItem('sc:reloadState'),
     }));
     assert.equal(r2.day, null, 'stale day not restored');
     assert.equal(r2.chip, 'Today');
@@ -304,7 +304,7 @@ test('J44: deploy watcher — same bytes: no reload; changed bytes: reload; file
   // file:// no-op: guard returns before fetching; baseline never set.
   const f = await openPage({
     server, feed: simpleFeed(), scoring: simpleScoring(), now: NOON,
-    url: 'file://' + INDEX_PATH, waitLoaded: false,
+    url: 'file://' + INDEX_PATH + '?event=1187', waitLoaded: false,
   });
   try {
     await f.page.waitForFunction(() => typeof checkForNewDeploy === 'function');

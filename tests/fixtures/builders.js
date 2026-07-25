@@ -43,8 +43,19 @@ function entry({
   };
 }
 
+// EventDetails mirrors the real 1187 feed: the address/location strings end
+// in "Montana", so applyFeedIdentity derives eventTz = America/Denver — the
+// zone every fixture time in this suite assumes (see denverMs in helpers).
 function feed(entries = []) {
-  return { EventDetails: { EventName: 'Test Event' }, EntryList: entries };
+  return {
+    EventDetails: {
+      EventName: 'Test Event',
+      EventDate: 'Jul 15 - Jul 19, 2026',
+      EventLocation: 'Rebecca Farm, Kalispell, Montana',
+      EventAddress: '1385 Farm to Market Road, Kalispell, Montana',
+    },
+    EntryList: entries,
+  };
 }
 
 function division({ id, name, phaseOrder = 'd-xc-sj' }) {
@@ -80,8 +91,9 @@ function scoring({ divisions = [], rows = [] } = {}) {
   return { EventDetails: {}, DivisionsList: divisions, ScoringList: rows };
 }
 
-// Names from the page's baked-in FOLLOWING list, for fixtures that should
-// be picked up without touching localStorage.
+// The nine fixture rider names. The page no longer bakes in a follow list —
+// helpers.openPage() seeds these into sc:1187:riders by default, so existing
+// fixtures and count assertions keep working unchanged.
 const FOLLOWED = {
   aulita: 'Aulita, Brittany',
   zook: 'Zook, Penelope',
@@ -93,9 +105,18 @@ const FOLLOWED = {
   goodman: 'Goodman, Stephanie',
   crocker: 'Crocker, Shelby',
 };
-const FOLLOWING_COUNT = 9;
+const FOLLOWING_NAMES = Object.values(FOLLOWED);
+const FOLLOWING_COUNT = FOLLOWING_NAMES.length; // 9
+
+// Trimmed real calendar payload (8 events incl. 1187) for the bare
+// `/api/sc/event` endpoint. Returned as a deep copy so tests can mutate
+// their own instance freely.
+const CALENDAR_FIXTURE = require('./calendar.json');
+function calendar() {
+  return JSON.parse(JSON.stringify(CALENDAR_FIXTURE));
+}
 
 module.exports = {
   rideTimeStr, ridingDetail, entry, feed, division, scoringRow, scoring,
-  FOLLOWED, FOLLOWING_COUNT,
+  FOLLOWED, FOLLOWING_NAMES, FOLLOWING_COUNT, calendar,
 };

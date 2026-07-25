@@ -118,10 +118,11 @@ test('R12c: the first data render consumes the one-shot landing — a no-rides o
   const fulfill = body => r => r.fulfill({
     contentType: 'application/json', headers: CORS, body: JSON.stringify(body) });
 
-  // (a) First render is the true empty state. Serve a page variant with no
-  // EXTRAS — the baked course-walk entry would otherwise give July 17 a
-  // chip and a row.
-  server.setPage(INDEX_HTML.replace(/const EXTRAS = \[[\s\S]*?\n\];/, 'const EXTRAS = [];'));
+  // (a) First render is the true empty state. Serve a page variant whose
+  // 1187 EVENT_CONFIGS block has no extras — the baked course-walk entry
+  // would otherwise give July 17 a chip and a row. (EXTRAS itself is
+  // resolved from EVENT_CONFIGS at boot, so the patch targets the config.)
+  server.setPage(INDEX_HTML.replace(/extras: \[[\s\S]*?\n    \],/, 'extras: [],'));
   let s = await openPage({ server, feed: F.feed([]), now: NOON });
   try {
     assert.equal(await s.page.$eval('#list .empty', el => el.textContent),
