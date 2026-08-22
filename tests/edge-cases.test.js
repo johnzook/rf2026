@@ -239,10 +239,9 @@ test('K-edge: follow-list names absent from the feed count toward the status but
     F.entry({ pinny: 888, rider: F.FOLLOWED.zook, details: [
       F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 13, 0) })] }),
   ]);
-  const s = await openPage({ server, feed, now: NOON, localStorage: {
-    'rf2026:myRiders': JSON.stringify(['Ghost, Rider']),          // not in the feed
-    'rf2026:hiddenRiders': JSON.stringify(['Nobody, Here']),      // not in FOLLOWING
-  } });
+  const s = await openPage({ server, feed, now: NOON,
+    // The nine usual names plus a ghost that matches nothing in the feed.
+    riders: [...F.FOLLOWING_NAMES, 'Ghost, Rider'] });
   try {
     assert.equal(s.page.__pageError, undefined);
     const r = await s.page.evaluate(() => ({
@@ -250,8 +249,7 @@ test('K-edge: follow-list names absent from the feed count toward the status but
       status: document.getElementById('status').textContent,
     }));
     assert.equal(r.rows, 1, 'only the real entry renders');
-    // 9 baked (none actually hidden — the hide names nobody) + 1 ghost add
-    // in the denominator; only zook actually matched the feed (R4).
+    // 10 stored names in the denominator; only zook matched the feed (R4).
     assert.ok(r.status.includes('1 of 10 riders found'), r.status);
   } finally { await s.context.close(); }
 });

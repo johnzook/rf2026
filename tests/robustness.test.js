@@ -86,35 +86,37 @@ test('BUG-null-pinny-next: two unnumbered combos are never conflated by nextRide
 // getStoredList caught JSON.parse errors but returned any valid-JSON value
 // as-is; a non-array (e.g. written by another tool on the same origin) made
 // effectiveFollowing() throw inside the fetch handler — zero rows plus a
-// misleading "can't reach ShowConnect" note, forever.
-test('BUG-myriders-non-array: non-array JSON in the follow-list keys degrades to the baked list', async () => {
+// misleading "can't reach ShowConnect" note, forever. With no baked list to
+// fall back to anymore, a corrupt store must degrade to the EMPTY list (the
+// add-riders empty state), never crash.
+test('BUG-myriders-non-array: non-array JSON in sc:1187:riders degrades to an empty list, never crashes', async () => {
   const feed = F.feed([
     F.entry({ pinny: 862, rider: F.FOLLOWED.zook, details: [
       F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 13, 0) })] }),
   ]);
   const s = await openPage({ server, feed, now: NOON, localStorage: {
-    'rf2026:myRiders': '{"oops":1}',
-    'rf2026:hiddenRiders': '"a string"',
+    'sc:1187:riders': '{"oops":1}', // valid JSON, wrong shape (wins over the default seed)
   } });
   try {
     const r = await s.page.evaluate(() => ({
-      rows: document.querySelectorAll('#list .row').length,
+      eff: effectiveFollowing(),
       err: document.getElementById('fetch-err').textContent,
       status: document.getElementById('status').textContent,
-      mine: getMyRiders(),
-      hidden: getHiddenRiders(),
+      hasPrompt: !!document.getElementById('add-riders-btn'),
     }));
-    assert.equal(r.rows, 1, 'the followed ride renders');
+    assert.deepEqual(r.eff, [], 'non-array store reads as empty');
     assert.equal(r.err, '', 'no phantom network-error note');
-    assert.ok(r.status.includes('1 of 9 riders found'), r.status);
-    assert.deepEqual(r.mine, []);
-    assert.deepEqual(r.hidden, []);
+    assert.ok(r.status.endsWith('no riders followed yet'), r.status);
+    assert.equal(r.hasPrompt, true, 'empty-state prompt shown, not a dead page');
     assert.equal(s.page.__pageError, undefined);
 
-    // The sheet (another getStoredList consumer) opens and works too.
-    await s.page.click('#edit-riders');
-    const listed = await s.page.$$eval('#my-riders-list .rrow', els => els.length);
-    assert.equal(listed, 9, 'sheet lists the baked follow list');
+    // The sheet (another getStoredList consumer) opens and still lets the
+    // user add riders — recovering from the corrupt value.
+    await s.page.click('#add-riders-btn');
+    await s.page.fill('#rider-search', 'zook');
+    await s.page.click('#rider-results button.rbtn.add[data-n="Zook, Penelope"]');
+    assert.deepEqual(await s.page.evaluate(() => getStoredList(RIDERS_KEY)), ['Zook, Penelope'],
+      'a fresh add overwrites the corrupt value');
     assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
 });
@@ -259,8 +261,8 @@ test('BUG-cache-hydrate-crash: a malformed cached payload never bricks the page'
   ]);
   const s = await openPage({ server, feed, now: NOON, localStorage: {
     // Valid JSON, wrong shape: EntryList is not iterable.
-    'rf2026:event': cacheBlob(NOON - 60_000, { EntryList: 5 }),
-    'rf2026:scoring': cacheBlob(NOON - 60_000, { DivisionsList: 7, ScoringList: 7 }),
+    'sc:1187:event': cacheBlob(NOON - 60_000, { EntryList: 5 }),
+    'sc:1187:scoring': cacheBlob(NOON - 60_000, { DivisionsList: 7, ScoringList: 7 }),
   } });
   try {
     assert.equal(s.page.__pageError, undefined, 'no uncaught top-level error');

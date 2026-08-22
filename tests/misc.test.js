@@ -109,8 +109,8 @@ test('N53: feed strings are HTML-escaped everywhere — no element injection', a
   ]);
   const s = await openPage({
     server, feed, now: NOON,
-    // Follow the malicious rider through the personal list.
-    localStorage: { 'rf2026:myRiders': JSON.stringify([evilRider]) },
+    // Follow the malicious rider through the stored list.
+    riders: [evilRider],
   });
   try {
     const r = await s.page.evaluate(evil => ({

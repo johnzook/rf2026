@@ -9,15 +9,26 @@ top-level functions directly in a browser context) or a functional test
 
 - `index.html` is a single classic-script page: all functions and state
   (`parseRideTime`, `extractRides`, `render`, `rides`, `resultsIdx`,
-  `DELAYS`, `OVERRIDES`, `ESTIMATES`, etc.) are reachable from
+  `DELAYS`, `OVERRIDE_IDX`, `EST_IDX`, `EXTRAS`, `deriveTz`,
+  `sanitizeCalendar`, `buildShareUrl`, etc.) are reachable from
   `page.evaluate` in Playwright (chromium at `/opt/pw-browsers/chromium`,
-  via `playwright-core`; do NOT run `playwright install`).
-- Stub both API endpoints with `page.route` fixtures:
-  `**/api/sc/event/1187` and `**/api/sc/event/1187/scoringLive`.
+  via `playwright-core`; do NOT run `playwright install`). The maintainer
+  config lives in `EVENT_CONFIGS[<id>]` but is resolved at boot into the
+  same mutable `DELAYS`/`DELAY_DATE`/`EXTRAS`/`OVERRIDE_IDX`/`EST_IDX`
+  bindings tests mutate via `page.evaluate`.
+- Stub all three API endpoints with `page.route` fixtures:
+  `**/api/sc/event/<id>`, `**/api/sc/event/<id>/scoringLive`, and the bare
+  calendar endpoint `**/api/sc/event` (end-anchored — it never swallows the
+  per-event routes). Tests must never touch the real network.
+- Tests open the app in event mode via `?event=1187` and seed the nine
+  fixture rider names into `sc:1187:riders` (there is no baked follow list
+  anymore); picker tests open the bare URL or `?choose` instead.
 - Pin time by overriding `eventLocalNow` (and `Date.now` where staleness
   logic is tested) via `page.evaluate` / `addInitScript`, then calling
   `render()`. Fixture data uses fixed July 2026 dates, so tests must never
-  depend on the real clock.
+  depend on the real clock. Fixture feeds carry a Montana
+  `EventDetails.EventAddress`, so the derived `eventTz` is America/Denver —
+  the zone every fixture wall-clock time assumes.
 - Prefer small synthetic fixtures crafted per scenario over the full
   captured payloads, so each state (upcoming/underway/done/out) is stable.
 
@@ -36,8 +47,10 @@ top-level functions directly in a browser context) or a functional test
    if they carry ride times.
 6. Flattening: one row per entry × scheduled phase, carrying rideTime,
    phase, venue, rider, horse, pinny, division, divisionShort.
-7. `eventLocalNow` returns Mountain-time wall clock regardless of the
-   host timezone (test with TZ=UTC and TZ=Asia/Tokyo contexts).
+7. `eventLocalNow` returns the event-local wall clock (the zone derived
+   from the feed per item 75 — America/Denver for the fixture feeds)
+   regardless of the host timezone (test with TZ=UTC and TZ=Asia/Tokyo
+   contexts).
 8. Day keys are zero-padded ISO (`2026-07-05` sorts before `2026-07-17`
    with plain string sort).
 
@@ -169,8 +182,9 @@ top-level functions directly in a browser context) or a functional test
 ## J. Persistence & network
 
 40. Successful event/scoring fetches cache payloads to localStorage
-    (`rf2026:event`, `rf2026:scoring`) with a timestamp; on load the page
-    hydrates and renders from cache before any network response. A fetch
+    (`sc:<id>:event`, `sc:<id>:scoring` — keyed per event, so another
+    event's cache can never hydrate this one) with a timestamp; on load the
+    page hydrates and renders from cache before any network response. A fetch
     whose serialized payload is identical to the last-written one skips
     the localStorage write entirely (the blob and its `at` stamp only
     change when content changes); `lastUpdatedMs` still refreshes on
@@ -179,7 +193,8 @@ top-level functions directly in a browser context) or a functional test
     and results; error note "can't reach ShowConnect, retrying" appears.
 42. Status line: fresh data → `Updated H:MM · N riders followed` when
     every followed name matched at least one accepted entry in the feed,
-    or `Updated H:MM · M of N riders found` when only M of the N did;
+    or `Updated H:MM · M of N riders found` when only M of the N did
+    (singular "rider" when N is 1);
     data older than 2 min → `Showing data from H:MM (N min old)` (hours
     form past 60 min).
 43. Fetch failures never clear previously-rendered data (fail-soft);
@@ -189,23 +204,27 @@ top-level functions directly in a browser context) or a functional test
 
 ## K. Per-browser follow list ("my riders")
 
-45. `effectiveFollowing()` = (FOLLOWING − hidden) ∪ personal adds;
-    with empty storage the page behaves exactly as baked (byte-identical
-    rendering assertion on rows + status count).
-46. Sheet lists the effective follow list with Remove on every rider;
-    removing a baked rider stores it in `rf2026:hiddenRiders` (not
-    deleting from mine); removing a personal add deletes it from
-    `rf2026:myRiders`.
+*(Rewritten for the multi-event refactor: there is no baked `FOLLOWING`
+list and no hidden-riders mechanism anymore — the follow list IS the
+per-event stored list `sc:<id>:riders`, chosen entirely in-app.)*
+
+45. `effectiveFollowing()` = the stored `sc:<id>:riders` list, period.
+    With no stored list (fresh browser, or storage wiped) nobody is
+    followed: the empty-state prompt renders (item 76), never a baked
+    default.
+46. Sheet lists the stored riders with Remove on every rider; Remove
+    deletes the name from `sc:<id>:riders` (a real delete — the removal
+    survives reload), drops the rider's rows from the timeline, and can be
+    undone only by re-adding.
 47. Search (≥2 chars, case-insensitive substring, top 20, built from
     accepted entries only) shows Add for unfollowed, Remove for followed;
-    Add on a hidden baked rider un-hides instead of duplicating into
-    personal adds.
-48. "Removed: ... · restore" note appears when hides exist; restore
-    clears all hides. Personal state persists across reload; a fresh
-    browser context sees only the baked list. Follower count in status
-    reflects the effective set (worded per item 42's found/followed
-    rule). Once a feed has loaded, sheet rows for followed names that
-    matched no accepted entry carry a muted `· no entries found` note.
+    Add appends the name once (already-present names are never
+    duplicated).
+48. The stored list persists across reload in the same browser profile; a
+    fresh browser context sees the empty state. Follower count in status
+    reflects the stored list (worded per item 42's found/followed rule).
+    Once a feed has loaded, sheet rows for followed names that matched no
+    accepted entry carry a muted `· no entries found` note.
 
 ## L. Extras (course walks etc.)
 
@@ -282,15 +301,16 @@ top-level functions directly in a browser context) or a functional test
     (Test `R7:`.)
 
 60. Deploy-reload state handoff: immediately before the auto-reload,
-    `checkForNewDeploy` writes `{at, selectedDay, scrollY}` to
-    sessionStorage key `rf2026:reloadState`. On startup, a key younger
-    than 2 minutes restores `selectedDay` before the first render,
-    restores the scroll offset at the first render of rows, and sets
-    `initialScrollDone = true` (no scroll-to-now landing). The key is
-    consumed (removed) whether fresh or stale; stale or absent state
-    behaves like a normal load, including today's now-landing. Pinned
-    popovers are NOT restored across reload (data may have changed).
-    (Test `R1:`; item 50 updated.)
+    `checkForNewDeploy` writes `{at, eventId, selectedDay, scrollY}` to
+    sessionStorage key `sc:reloadState`. On startup, a key younger
+    than 2 minutes whose `eventId` matches the current event restores
+    `selectedDay` before the first render, restores the scroll offset at
+    the first render of rows, and sets `initialScrollDone = true` (no
+    scroll-to-now landing). The key is consumed (removed) whether fresh or
+    stale; stale, absent, or other-event state (item 72) behaves like a
+    normal load, including today's now-landing. Pinned popovers are NOT
+    restored across reload (data may have changed). (Test `R1:`; item 50
+    updated.)
 
 61. Pinned-popover survival across re-render, per item 39's data-key
     rule. (Test `R2:`.)
@@ -313,3 +333,117 @@ top-level functions directly in a browser context) or a functional test
     `constructor`/`toString`/`__proto__` misses the map — a FinalPlace of
     "constructor" yields not-out, and the done line never stringifies an
     inherited function. (Test `R11b:`; extends item 58.)
+
+## P. Multi-event, event picker & sharing (July 2026 refactor)
+
+The single-event page became a multi-event app: the event is chosen by URL
+(`?event=<ShowConnectId>`) or via an in-page picker fed by the bare
+calendar endpoint; the follow list is per-event and shareable via URL.
+Group-K items 45–48, items 7/40/42/60 and the testability notes were
+updated in place for the same refactor.
+
+66. URL scheme & boot routing: `?event=<id>` loads that event (writing
+    `sc:last-event` only once its feed actually loads — item 82); a bare
+    URL auto-loads `sc:last-event` when present
+    (with `history.replaceState` upgrading the URL to the canonical
+    `?event=<id>`), else shows the picker; `?choose` always shows the
+    picker, even with a last-event stored; an invalid `?event` value
+    (non-numeric, or numeric longer than 9 digits — parseInt would
+    round-trip it as exponent notation) falls back to the picker. In picker mode the app chrome
+    (header/main/footer) is hidden, the picker shown, and the title reads
+    "Choose an event — Ride Times"; in event mode the reverse. The
+    header's "switch event" control navigates to `?choose`.
+67. Picker sections from the calendar payload, by `CalendarPosition`:
+    "Happening now" (1), "Upcoming" (2), "Recent" (3, capped at 15 unless
+    searching — the rest reachable via search); empty sections are
+    omitted; calendar order is preserved within a section. Each row
+    carries the event name, `date · location` meta, and an "entries not
+    published yet" note when `PublishEntryList` is false (still
+    selectable).
+68. Picker filter: case-insensitive substring match against event name OR
+    location, across all sections (sections without hits vanish);
+    "No events match." when nothing hits; clearing restores the full
+    list.
+69. Clicking a picker row performs a full navigation to `?event=<id>`
+    (clean state, working back button) and lands in the event view.
+70. Manual entry accepts a bare numeric ShowConnectId or a pasted
+    showconnect.org URL containing `ShowConnectId=NNN` (case-insensitive),
+    both bounded to 9 digits (item 66), via the Go button or Enter;
+    invalid input shows an inline error and
+    stays on the picker; a subsequent valid entry navigates.
+71. Calendar caching: `sc:calendar` holds `{at, value}` with a 6 h TTL. A
+    fresh cache renders without refetching; a stale cache renders
+    immediately while revalidating — and while fully offline, with a
+    "showing a saved list" note; total failure with no cache shows an
+    error note and leaves manual entry usable. Degenerate payloads (null,
+    non-array, entries missing/mistyped fields) sanitize to a clean list
+    (`sanitizeCalendar`) without throwing, and a degenerate response never
+    clobbers a previously-good list or its cache.
+72. Per-event storage isolation: the follow list lives at
+    `sc:<id>:riders` — riders stored for one event never appear for
+    another, and edits write only the current event's key. After a
+    successful feed fetch, other events' `sc:<other>:event` /
+    `sc:<other>:scoring` caches are evicted (quota hygiene); every event's
+    `:riders` list is kept. `sc:reloadState` carries the `eventId` and is
+    restored only when it matches the current event (consumed either
+    way).
+73. Legacy migration at boot: when loading event 1187 with no
+    `sc:1187:riders` stored, a legacy `rf2026:myRiders` array seeds it
+    (string entries only; an existing store wins; other events never
+    import it). Legacy `rf2026:event` / `rf2026:scoring` blobs are
+    deleted at boot to free quota.
+74. Event identity: `#event-name` and `document.title`
+    (`"<name> — Ride Times"`) come from `EventDetails.EventName` once the
+    feed loads; before that, the calendar cache's name for the event is
+    used; with neither, the neutral "Ride Times" default. The footer
+    reads `Times are event-local (<short zone>). Tap a ride for details.`
+    with the derived zone's short name (MDT for the Montana fixtures).
+75. Timezone derivation: `deriveTz` scans comma-separated segments
+    last-to-first across the feed's address/location strings (and the
+    calendar entry's location) for a trailing US state name — tolerating
+    trailing zips and D.C. punctuation, case-insensitively — and maps it
+    to the state's primary IANA zone (Montana→America/Denver,
+    Washington→America/Los_Angeles, …); unknown yields null and `eventTz`
+    stays the device zone. The derived zone drives `eventLocalNow` and
+    all clock displays.
+76. Empty follow state: with nobody followed, the main list shows a
+    prompt ("No riders followed yet…") with an "Add riders to follow"
+    button opening the rider sheet — no day chips, no delay banner — and
+    the status line reads "… no riders followed yet"; adding the first
+    rider swaps the prompt for the timeline.
+77. `buildShareUrl()` =
+    `origin + pathname + "?event=<id>&riders=" +
+    encodeURIComponent(names.join("|"))` — names with commas/spaces
+    survive an encode/decode round-trip verbatim.
+78. Share row in the rider sheet: hidden with 0 riders, shown with ≥1.
+    Fallbacks always present: an `sms:?&body=<encoded url>` "Text it"
+    link and a Copy-link button (clipboard write + transient "copied"
+    tag); the native Share button appears only when `navigator.share`
+    exists and shares `{title: "<event> — riders", url}`.
+79. Receiving `?riders=` with an empty stored list adopts the shared
+    names silently (persisted to `sc:<id>:riders`, rows render); a shared
+    list identical (as a set) to the stored one shows no banner. Names
+    are taken verbatim — never trimmed (the feed ships strings with stray
+    whitespace and follow matching is exact) — with whitespace-only
+    entries and duplicates dropped. A riders param WITHOUT an explicit
+    `?event` (truncated/hand-edited link) is ignored outright — nothing
+    adopts into the last-viewed event. Every path — including a plain
+    `?event=` load — ends with `history.replaceState` cleaning the URL to
+    `?event=<id>`.
+80. Receiving `?riders=` with a differing stored list shows the banner
+    "This link shares N rider(s) for this event" (store untouched, URL
+    uncleaned while pending): "Add to mine" appends the new names deduped,
+    "Replace mine" overwrites, "Ignore" keeps the store; every choice
+    hides the banner, cleans the URL, and re-filters the timeline.
+81. Shared names not found in the feed behave exactly like any ghost
+    follow: counted in "M of N riders found" and flagged
+    `· no entries found` in the sheet (items 42/48/56).
+82. Unknown event id: the real API answers 200 + a JSON `null` body for
+    an id that doesn't exist — that, and an HTTP 404, both show
+    "event not found — check the id or switch event" instead of the
+    retry note; a plain network failure still shows
+    "can't reach ShowConnect, retrying". `sc:last-event` is written only
+    after a successful feed load, so a typo'd or dead id never becomes
+    the bare-URL resume target. Feed caches for other events are evicted
+    BEFORE the current event's cache is written, so a quota-full first
+    visit succeeds on its first fetch.

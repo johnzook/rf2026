@@ -67,6 +67,10 @@ All verified live against ShowConnect during the event:
 
 ## Event-specific things to genericize
 
+[Update, July 2026: this checklist is now done — the app is multi-event.
+Kept as written for the record; see "Post-genericization" below for what
+was built.]
+
 - `EVENT_ID` (1187), `EVENT_TZ` ("America/Denver"), page title/header,
   `FOLLOWING`, `DELAY_DATE`/`DELAYS` venue keys, `OVERRIDES`,
   `ESTIMATES`, `EXTRAS` — all hardcoded for this event (config at top of
@@ -91,7 +95,8 @@ Owner's dispositions recorded post-event (July 2026):
    static page.
 2. **Per-rider share links** (`?rider=` filter) — subsumed by the generic
    version: solving "not hard-coded" there should cover per-viewer rider
-   scoping; don't build separately.
+   scoping; don't build separately. [Built July 2026, exactly this way:
+   generic `?event=<id>&riders=…` share links — see below.]
 3. **Override-vs-feed drift detection** — owner expects this to be the
    HARDEST part of a generic tool: schedule revisions are super rare but
    high-impact when they happen (this event re-ordered an entire XC day
@@ -118,3 +123,63 @@ Owner's dispositions recorded post-event (July 2026):
   fetch/parse stays isolated (`extractRides`, `buildResultsIndex`,
   `parseRideTime`), and degenerate-input behavior is pinned by
   `tests/robustness.test.js` / `edge-cases.test.js`.
+
+## Post-genericization (July 2026)
+
+The single-event page above was genericized into a multi-event app
+shortly after Rebecca Farm 2026 (same repo, still one self-contained
+`index.html`, classic script, no backend). Test counts elsewhere in this
+doc describe the pre-genericization suite.
+
+**Genericize checklist: done.** All items in "Event-specific things to
+genericize" landed:
+
+- Event id is chosen at runtime: `?event=<ShowConnectId>`; bare URL
+  resumes `sc:last-event`, else shows an event picker (`?choose` forces
+  it), which also accepts a typed id or pasted showconnect.org URL.
+  Header/title come from `EventDetails.EventName`.
+- Timezone is derived at runtime (see below); footer shows the zone's
+  short name.
+- Storage prefixes are per-event: `sc:<id>:riders` / `sc:<id>:event` /
+  `sc:<id>:scoring` (plus global `sc:last-event`, `sc:calendar`,
+  `sc:reloadState` — the reload state carries an eventId and only
+  restores for a matching event). Other events' feed caches are evicted
+  after a successful fetch; every event's `:riders` is kept. Legacy
+  `rf2026:myRiders` migrates once to `sc:1187:riders`; other `rf2026:*`
+  keys are deleted.
+- `FOLLOWING` and the hidden/restore mechanism are gone: riders are
+  chosen entirely in-app and stored per event.
+- Share links exist: `?event=<id>&riders=<encoded "Last, First" names
+  joined with "|">`, sent via navigator.share / `sms:` / copy. Receiving
+  onto an empty list adopts silently; otherwise an Add/Replace/Ignore
+  banner. The URL is canonicalized to `?event=<id>` via replaceState.
+  This is deferred feature #2, now built.
+
+**Calendar endpoint (newly verified live, July 2026).**
+`GET /api/sc/event` (no id) — what showconnect.org/calendar itself uses —
+returns a JSON array of ~105 events (~11 KB): `ShowConnectId`,
+`EventName`, `EventDate` (display string), `EventStartDate`/`EventEndDate`
+(ISO), `EventLocation`, `EventAddress`, `PublishEntryList`/
+`PublishSchedule`/`PublishScoring`, and `CalendarPosition`: **1 =
+happening now, 2 = upcoming (sorted ascending), 3 = past (most recent
+first)**. It is flaky: observed one 90 s+ hang followed by a 0.9 s
+success. Hence the picker uses the same 10 s fetch abort, caches the list
+in `sc:calendar` with a 6 h TTL (stale cache renders immediately while
+revalidating), and tolerates total failure — manual id entry always
+works.
+
+**No timezone anywhere in the API** — neither feed nor calendar carries
+one. Chosen heuristic: scan the comma-separated segments of
+`EventAddress`/`EventLocation` last-to-first for a US state name and map
+it to that state's primary IANA zone (`STATE_TZ`; split-zone states get
+the majority zone), falling back to the device zone. Wrong only for
+venues in a state's minority zone — accepted as strictly better than a
+fixed zone.
+
+**Maintainer layer unchanged in kind, rescoped.** Delays / overrides /
+estimates / extras remain a maintainer-only constant block edited via
+commit→deploy, now `EVENT_CONFIGS = { [ShowConnectId]: { delayDate,
+delays, overrides, estimates, extras } }`, applied only when the viewed
+event matches its key (other entries inert; 1187 kept as the worked
+example). Override-vs-feed drift detection — deferred feature #3, still
+expected to be the hardest part — remains unbuilt.
