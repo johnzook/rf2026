@@ -196,7 +196,11 @@ top-level functions directly in a browser context) or a functional test
     or `Updated H:MM · M of N riders found` when only M of the N did
     (singular "rider" when N is 1);
     data older than 2 min → `Showing data from H:MM (N min old)` (hours
-    form past 60 min).
+    form past 60 min). With nobody followed the follow note reads
+    `no riders followed yet`. The wording is produced by one shared
+    `updateStatusLine()` and set on EVERY render path — timeline, empty
+    day, pre-schedule roster, nobody-followed — never left stale by an
+    early return (item 84).
 43. Fetch failures never clear previously-rendered data (fail-soft);
     scoring failures are silent.
 44. Deploy watcher: identical self-fetch → no reload; changed bytes →
@@ -270,8 +274,9 @@ per-event stored list `sc:<id>:riders`, chosen entirely in-app.)*
     names that matched at least one accepted entry. Status shows
     `M of N riders found` when M < N, plain `N riders followed`
     otherwise; the my-riders sheet appends a muted `· no entries found`
-    to unmatched rows, only once a feed has loaded. (Test `R4:`; items
-    42/48 updated.)
+    to unmatched rows, only once a feed has loaded. The pre-schedule
+    roster (item 83) uses the same `no entries found` wording for
+    followed names with no entries. (Test `R4:`; items 42/48 updated.)
 
 57. Active-chip visibility: after rendering the day chips, if the active
     chip is not fully visible inside the scrollable chip row, the row's
@@ -409,8 +414,13 @@ updated in place for the same refactor.
 76. Empty follow state: with nobody followed, the main list shows a
     prompt ("No riders followed yet…") with an "Add riders to follow"
     button opening the rider sheet — no day chips, no delay banner — and
-    the status line reads "… no riders followed yet"; adding the first
-    rider swaps the prompt for the timeline.
+    the status line reads `Updated H:MM · no riders followed yet` (the
+    shared item-42 wording, so data older than 2 min shows the
+    `Showing data from …` form instead); adding the first rider
+    immediately (no reload) swaps the prompt for the timeline — or for
+    the pre-schedule roster (item 83) when no ride times are posted yet —
+    and updates the status line and header count; removing the last rider
+    swaps back to the prompt with the adapted status.
 77. `buildShareUrl()` =
     `origin + pathname + "?event=<id>&riders=" +
     encodeURIComponent(names.join("|"))` — names with commas/spaces
@@ -447,3 +457,50 @@ updated in place for the same refactor.
     the bare-URL resume target. Feed caches for other events are evicted
     BEFORE the current event's cache is written, so a quota-full first
     visit succeeds on its first fetch.
+
+## Q. Pre-event UX (Aug 2026)
+
+Before an event's schedule posts, the real feed has hundreds of entries
+whose `RidingDetails[].RideTimes` are all `""` and `PinnyNumber` all null,
+so `extractRides()` yields zero rides and there are no day chips. The page
+previously looked stuck ("Loading…"/stale status + a bare "No scheduled
+rides yet" line); these items make the pre-event state first-class.
+
+83. Pre-schedule roster: when riders are followed, a feed has loaded
+    (`lastFeed` set — fetched OR hydrated from cache, e.g. fully offline),
+    and `rides.length === 0`, the main list shows, instead of the bare
+    "No scheduled rides yet…" line:
+    - a muted lead-in (`.pre-note.lead-in`): "Ride times aren't posted
+      yet — they'll appear here automatically once ShowConnect publishes
+      the schedule.";
+    - when `EventDetails.OfficeComment` is a non-empty string, a muted
+      `Event notes: <comment>` line (`.pre-note.office-note`), escaped —
+      it is untrusted feed prose; absent when empty/missing/non-string;
+    - one card (`.row.roster`) per `lastFeed.EntryList` entry whose
+      `RiderName` is in the followed list (verbatim match, ANY Status),
+      in stored-list order then feed order for a rider's multiple horses:
+      rider name, horse, division short name + full name, bold `#pinny`
+      only when non-null, and for `Status !== "Accepted"` a lowercased
+      `· <status>` annotation with the row dimmed via the existing `.out`
+      class;
+    - a dimmed `no entries found` row (same wording as the sheet
+      annotation, item 56) for each followed name with no entries at all.
+    No day chips render (no ride days), roster cards are not interactive
+    (no popovers/pins), and all feed strings go through `esc()`. The
+    "No rides on this day for the followed riders." message (rides exist,
+    selected day empty) and the nobody-followed prompt (item 76) are
+    unchanged; with no feed at all the old "No scheduled rides yet for
+    the followed riders." line still shows. A later poll that delivers
+    ride times replaces the roster with the normal timeline.
+84. Status/controls update on EVERY render path (the pre-event "stuck"
+    regression): the `dayRides.length === 0` early return previously
+    skipped the status-line block, leaving `#status` showing the static
+    "Loading…" on a fresh pre-event load or a stale
+    "no riders followed yet" right after adding the first rider.
+    `updateStatusLine()` (shared item-42 wording) and `updateNowBtn()`
+    now run on all branches of `render()`, and the header `#edit-riders`
+    control shows the live follow count — `＋ my riders (N)`, plain
+    `＋ my riders` at zero (and in picker mode, where the header is
+    hidden) — updated in `render()`, which every follow-list mutation
+    (sheet add/remove, share adoption, storage edits) already flows
+    through.

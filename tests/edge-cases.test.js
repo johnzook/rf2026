@@ -47,15 +47,19 @@ test('A-edge: null venue on DELAY_DATE gets no delay (no DELAYS key matches "")'
   } finally { await s.context.close(); }
 });
 
-test('A-edge: empty EntryList and empty ScoringList render the empty state, no crash', async () => {
+test('A-edge: empty EntryList and empty ScoringList render the pre-schedule roster (all ghosts), no crash', async () => {
   const s = await openPage({ server, feed: { EntryList: [] }, scoring: {}, now: NOON });
   try {
     assert.equal(s.page.__pageError, undefined);
     // The baked EXTRAS item still earns its chip (R9); with extras cleared
-    // too, the true empty state shows with no chips at all.
+    // too, zero rides + a loaded feed show the pre-schedule roster (item
+    // 83): all nine followed names are ghosts here, with no chips at all.
     await s.page.evaluate(() => { EXTRAS.length = 0; render(); });
-    const empty = await s.page.$eval('#list .empty', e => e.textContent);
-    assert.equal(empty, 'No scheduled rides yet for the followed riders.');
+    assert.ok(await s.page.$('#list .pre-note.lead-in'), 'pre-schedule lead-in shown');
+    const ghosts = await s.page.$$eval('#list .row.roster', els =>
+      els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
+    assert.equal(ghosts.length, 9, 'one ghost row per followed name');
+    assert.ok(ghosts.every(g => g.endsWith('no entries found')), ghosts.join(' | '));
     assert.equal(await s.page.$$eval('#days .day-chip', els => els.length), 0, 'no day chips');
   } finally { await s.context.close(); }
 });

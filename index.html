@@ -104,6 +104,10 @@
     padding: 1px 8px; border-radius: 999px;
   }
 
+  /* Pre-schedule roster: entries exist but no ride times posted yet */
+  .pre-note { color: var(--muted); font-size: 13px; margin: 4px 2px 12px; }
+  .row.roster { grid-template-columns: 1fr auto; cursor: default; }
+
   /* Detail popover: shows on hover (pointer devices) or when pinned by tap/click */
   .pop {
     display: none;
@@ -858,9 +862,13 @@ function render() {
   const todayKey = isoDay(now);
   const list = document.getElementById("list");
 
+  // Every render path funnels through here, so the header follow-count
+  // label tracks add/remove/share edits without extra call sites.
+  const followingNow = effectiveFollowing();
+  updateFollowLabel(followingNow.length);
+
   // Empty follow state: no baked list exists anymore, so a fresh browser
   // follows nobody — prompt instead of rendering an empty timeline.
-  const followingNow = effectiveFollowing();
   if (followingNow.length === 0) {
     document.getElementById("days").innerHTML = "";
     document.getElementById("delay-banner").hidden = true;
@@ -871,9 +879,10 @@ function render() {
       document.getElementById("rider-sheet").hidden = false;
       renderRiderSheet();
     };
-    document.getElementById("status").textContent = lastUpdatedMs
-      ? `Updated ${clockInEventTz(lastUpdatedMs)} · no riders followed yet`
-      : "";
+    // Keep the shared status wording honest even if a caller skipped
+    // extractRides on the way here (followedCount is set there).
+    followedCount = 0;
+    updateStatusLine();
     // This render consumed the one-shot landing too (mirrors the no-rows
     // branch below): the scroll-to-now must not fire later.
     if (lastUpdatedMs !== null) initialScrollDone = true;
@@ -932,14 +941,23 @@ function render() {
   const pinnedEl = list.querySelector(".row.pinned");
   const pinnedKey = pinnedEl ? pinnedEl.dataset.key : null;
   if (dayRides.length === 0) {
-    list.innerHTML = `<div class="empty">${rides.length === 0
-      ? "No scheduled rides yet for the followed riders."
-      : "No rides on this day for the followed riders."}</div>`;
+    if (rides.length === 0 && lastFeed) {
+      // Pre-schedule: the feed answered (or hydrated from cache) but no
+      // followed entry carries a ride time yet — show the entry roster so
+      // the page is useful before ShowConnect publishes the schedule.
+      list.innerHTML = preScheduleHTML(followingNow);
+    } else {
+      list.innerHTML = `<div class="empty">${rides.length === 0
+        ? "No scheduled rides yet for the followed riders."
+        : "No rides on this day for the followed riders."}</div>`;
+    }
     // This render consumed the one-shot landing too: if the page first
     // loads on a day with no rides, the scroll-to-now must not fire
     // hours/days later when today first gains rows. (Only once feed data
     // exists — a scoring-first render must not eat the landing early.)
     if (lastUpdatedMs !== null) initialScrollDone = true;
+    updateStatusLine();
+    updateNowBtn();
     return;
   }
 
@@ -1082,6 +1100,13 @@ function render() {
     });
   }
 
+  updateStatusLine();
+}
+
+// Status line, shared by EVERY render path (timeline, empty day, roster,
+// nobody-followed) so an early-return branch can never leave stale text
+// ("Loading…" on a pre-event load) in the header.
+function updateStatusLine() {
   let statusText = "";
   if (lastUpdatedMs) {
     const ageMin = Math.round((Date.now() - lastUpdatedMs) / 60_000);
@@ -1089,7 +1114,9 @@ function render() {
     // name is visible as "M of N riders found" instead of silently
     // inflating N.
     const found = matchedNames ? matchedNames.size : followedCount;
-    const followNote = found < followedCount
+    const followNote = followedCount === 0
+      ? "no riders followed yet"
+      : found < followedCount
       ? `${found} of ${followedCount} rider${followedCount === 1 ? "" : "s"} found`
       : `${followedCount} rider${followedCount === 1 ? "" : "s"} followed`;
     statusText = ageMin >= 2
@@ -1097,6 +1124,57 @@ function render() {
       : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followNote}`;
   }
   document.getElementById("status").textContent = statusText;
+}
+
+// Header "my riders" control shows the live follow count (e.g.
+// "＋ my riders (3)"); plain label with nobody followed. Set from render(),
+// which every follow-list mutation already goes through.
+function updateFollowLabel(n) {
+  document.getElementById("edit-riders").textContent =
+    n > 0 ? `＋ my riders (${n})` : "＋ my riders";
+}
+
+// Pre-schedule roster: one card per followed entry from lastFeed.EntryList
+// (any Status — a scratched entry is shown dimmed with its status), in
+// stored-list order then feed order for a rider's multiple horses. Followed
+// names with no entries at all get a "no entries found" row (same wording
+// as the rider-sheet annotation). All feed strings escaped.
+function preScheduleHTML(following) {
+  const entries = (lastFeed && Array.isArray(lastFeed.EntryList)) ? lastFeed.EntryList : [];
+  const cards = [];
+  for (const name of following) {
+    const mine = entries.filter(e => e && e.RiderName === name);
+    if (!mine.length) {
+      cards.push(`
+        <div class="row roster out">
+          <div class="who">
+            <div class="rider">${esc(name)}</div>
+            <div class="horse">no entries found</div>
+          </div>
+        </div>`);
+      continue;
+    }
+    for (const e of mine) {
+      const outNote = e.Status !== "Accepted"
+        ? ` · ${esc(String(e.Status || "").toLowerCase())}` : "";
+      cards.push(`
+        <div class="row roster${outNote ? " out" : ""}">
+          <div class="who">
+            <div class="rider">${esc(e.RiderName)}</div>
+            <div class="horse">${esc(e.HorseName)}${e.PinnyNumber != null ? ` · <b>#${esc(e.PinnyNumber)}</b>` : ""}${outNote}</div>
+          </div>
+          <div class="meta">
+            <div class="phase">${esc(e.DivisionShortName || "")}</div>
+            <div class="venue">${esc(e.Division || "")}</div>
+          </div>
+        </div>`);
+    }
+  }
+  const det = lastFeed && lastFeed.EventDetails;
+  const comment = det && typeof det.OfficeComment === "string" && det.OfficeComment.trim()
+    ? `<div class="pre-note office-note">Event notes: ${esc(det.OfficeComment.trim())}</div>`
+    : "";
+  return `<div class="pre-note lead-in">Ride times aren't posted yet — they'll appear here automatically once ShowConnect publishes the schedule.</div>${comment}${cards.join("")}`;
 }
 
 // ---- Event identity (name, title, footer timezone) ----
@@ -1594,7 +1672,10 @@ if (eventId !== null) {
     }
     const sc = cacheGet(CACHE_SCORING);
     if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
-    if (rides.length) render();
+    // Any cached feed renders immediately (rows, or the pre-schedule
+    // roster when the cache predates the published schedule) — the page
+    // must be useful offline before any fetch settles.
+    if (rides.length || lastFeed) render();
   } catch (e) {
     lastFeed = null; rides = []; resultsIdx = Object.create(null); lastUpdatedMs = null;
   }
