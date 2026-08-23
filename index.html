@@ -143,7 +143,14 @@
     box-shadow: var(--shadow); cursor: pointer; z-index: 30; opacity: .92;
   }
   #now-btn[hidden] { display: none; }
-  .linklike { border: none; background: none; color: var(--accent); font-size: 12px; font-weight: 600; padding: 0; cursor: pointer; font-family: inherit; }
+  /* Header action pills: visually distinct from the status text above. */
+  .actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+  .hbtn {
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    border-radius: 999px; padding: 3px 12px; font-size: 12.5px; font-weight: 600;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  .hbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   #rider-sheet { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 40; display: flex; align-items: flex-end; }
   #rider-sheet[hidden] { display: none; }
   .sheet-card {
@@ -197,10 +204,12 @@
   <div class="sub">
     <span id="status">Loading…</span>
     <span id="fetch-err" class="err"></span>
-    <button id="edit-riders" class="linklike">＋ my riders</button>
-    <button id="share-page" class="linklike" hidden>share</button>
+  </div>
+  <div class="actions">
+    <button id="edit-riders" class="hbtn primary">＋ my riders</button>
+    <button id="share-page" class="hbtn" hidden>share</button>
     <span id="share-page-done" class="rtag" hidden>copied</span>
-    <button id="switch-event" class="linklike">switch event</button>
+    <button id="switch-event" class="hbtn">switch event</button>
   </div>
   <div class="days" id="days"></div>
 </header>
