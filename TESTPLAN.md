@@ -172,7 +172,9 @@ top-level functions directly in a browser context) or a functional test
     row → "Not posted yet".
 39. Tap pins exactly one popover (tapping another row moves the pin;
     tapping the pinned row unpins); clicks inside the popover don't
-    unpin. A pinned popover survives re-render: ride rows carry a stable
+    unpin. Tapping anywhere OUTSIDE a row (page background, header,
+    chips) dismisses the pin, as does Escape — applies to timeline and
+    roster (item 85) popovers alike. A pinned popover survives re-render: ride rows carry a stable
     `data-key` (pinny|phase|dayKey), the pinned row's key is captured
     before `#list` is rebuilt and the pin re-applied to the matching row
     afterwards; if the row no longer exists (rider removed, day switched)
@@ -441,7 +443,12 @@ updated in place for the same refactor.
     Fallbacks always present: an `sms:?&body=<encoded url>` "Text it"
     link and a Copy-link button (clipboard write + transient "copied"
     tag); the native Share button appears only when `navigator.share`
-    exists and shares `{title: "<event> — riders", url}`.
+    exists and shares `{title: "<event> — riders", url}`. The header
+    also carries a one-tap `#share-page` control on the main page
+    (hidden with 0 riders, and in picker mode with the header): native
+    share sheet when available, else clipboard copy with a transient
+    "copied" tag, else a prompt() — the richer options stay in the
+    sheet.
 79. Receiving `?riders=` with an empty stored list adopts the shared
     names silently (persisted to `sc:<id>:riders`, rows render); a shared
     list identical (as a set) to the stored one shows no banner. Names

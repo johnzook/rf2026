@@ -198,6 +198,8 @@
     <span id="status">Loading…</span>
     <span id="fetch-err" class="err"></span>
     <button id="edit-riders" class="linklike">＋ my riders</button>
+    <button id="share-page" class="linklike" hidden>share</button>
+    <span id="share-page-done" class="rtag" hidden>copied</span>
     <button id="switch-event" class="linklike">switch event</button>
   </div>
   <div class="days" id="days"></div>
@@ -1133,6 +1135,18 @@ function attachRowPins(list) {
     });
   }
 }
+// Tapping anywhere outside a row dismisses a pinned popover (row taps
+// manage their own pin state above); Esc does the same on desktop.
+function unpinAll() {
+  for (const el of document.querySelectorAll(".row.pinned")) el.classList.remove("pinned");
+}
+document.addEventListener("click", ev => {
+  if (ev.target.closest(".row")) return;
+  unpinAll();
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") unpinAll();
+});
 
 // Status line, shared by EVERY render path (timeline, empty day, roster,
 // nobody-followed) so an early-return branch can never leave stale text
@@ -1166,6 +1180,9 @@ function updateStatusLine() {
 function updateFollowLabel(n) {
   document.getElementById("edit-riders").textContent =
     n > 0 ? `＋ my riders (${n})` : "＋ my riders";
+  // The header share control needs a list worth sharing.
+  document.getElementById("share-page").hidden = n === 0;
+  if (n === 0) document.getElementById("share-page-done").hidden = true;
 }
 
 // Pre-schedule roster: one card per followed entry from lastFeed.EntryList
@@ -1673,6 +1690,27 @@ document.getElementById("share-copy").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(url);
       const tag = document.getElementById("share-copied");
+      tag.hidden = false;
+      setTimeout(() => { tag.hidden = true; }, 2000);
+      return;
+    } catch (e) { /* fall through to prompt */ }
+  }
+  prompt("Copy this link:", url);
+});
+// Header share: one tap from the main page. Native share sheet where the
+// browser has one; otherwise copy-with-confirmation. The richer options
+// (Text it / Copy link) stay in the rider sheet.
+document.getElementById("share-page").addEventListener("click", async () => {
+  const url = buildShareUrl();
+  if (navigator.share) {
+    const name = document.getElementById("event-name").textContent;
+    navigator.share({ title: `${name} — riders`, url }).catch(() => {});
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(url);
+      const tag = document.getElementById("share-page-done");
       tag.hidden = false;
       setTimeout(() => { tag.hidden = true; }, 2000);
       return;
