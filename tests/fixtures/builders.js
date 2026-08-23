@@ -25,6 +25,14 @@ function ridingDetail({ phase, venue = 'R1', time = '', venueDate = '2026-07-16'
   };
 }
 
+// Pre-schedule RidingDetails, mirroring the real pre-event shape (verified
+// against event 1190 before its schedule posted): the phase rows exist but
+// RideTimes is "" and Venues[0].venue is null. Pair with `pinny: null` on
+// the entry — pinnies are unassigned until the schedule publishes.
+function unscheduledDetails(phases = ['Dressage', 'Cross Country', 'Show Jumping']) {
+  return phases.map(phase => ridingDetail({ phase, venue: null, time: '' }));
+}
+
 // One EntryList item. `details` is an array of ridingDetail() objects.
 function entry({
   pinny, rider, horse = 'Test Horse', division = 'Test Division',
@@ -117,6 +125,6 @@ function calendar() {
 }
 
 module.exports = {
-  rideTimeStr, ridingDetail, entry, feed, division, scoringRow, scoring,
-  FOLLOWED, FOLLOWING_NAMES, FOLLOWING_COUNT, calendar,
+  rideTimeStr, ridingDetail, unscheduledDetails, entry, feed, division,
+  scoringRow, scoring, FOLLOWED, FOLLOWING_NAMES, FOLLOWING_COUNT, calendar,
 };

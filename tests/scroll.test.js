@@ -125,8 +125,8 @@ test('R12c: the first data render consumes the one-shot landing — a no-rides o
   server.setPage(INDEX_HTML.replace(/extras: \[[\s\S]*?\n    \],/, 'extras: [],'));
   let s = await openPage({ server, feed: F.feed([]), now: NOON });
   try {
-    assert.equal(await s.page.$eval('#list .empty', el => el.textContent),
-      'No scheduled rides yet for the followed riders.');
+    assert.ok(await s.page.$('#list .pre-note.lead-in'),
+      'zero rides + loaded feed render the pre-schedule roster (item 83)');
     assert.equal(await s.page.evaluate(() => initialScrollDone), true,
       'empty first render consumes the one-shot landing');
 
