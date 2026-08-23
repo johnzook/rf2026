@@ -222,13 +222,18 @@ per-event stored list `sc:<id>:riders`, chosen entirely in-app.)*
     deletes the name from `sc:<id>:riders` (a real delete — the removal
     survives reload), drops the rider's rows from the timeline, and can be
     undone only by re-adding.
-47. Search (≥2 chars, case-insensitive substring, top 20) indexes entries
-    of EVERY status — a scratched rider must stay findable, since
-    scratches can un-scratch. Non-accepted horses are annotated in place
-    ("Horse (scratched)"); a rider with no accepted entries at all is
-    dimmed but still addable. Shows Add for unfollowed, Remove for
-    followed; Add appends the name once (already-present names are never
-    duplicated).
+47. Browse + filter: with an empty box the sheet lists EVERY entered
+    rider (alphabetical, letter-group headers); typing filters —
+    case-insensitive substring, any length, matching rider name, horse
+    name, or division (full or short, so "novice"/"ONB" browses a
+    level); no result cap. Entries of EVERY status are indexed — a
+    scratched rider must stay findable, since scratches can un-scratch.
+    Each horse shows its division short name; non-accepted horses are
+    annotated in place ("Horse (ONB, scratched)"); a rider with no
+    accepted entries at all is dimmed but still addable. Shows Add for
+    unfollowed, Remove for followed; Add appends the name once
+    (already-present names are never duplicated). With no feed loaded
+    the list area reads "Entry list not loaded yet."
 48. The stored list persists across reload in the same browser profile; a
     fresh browser context sees the empty state. Follower count in status
     reflects the stored list (worded per item 42's found/followed rule).

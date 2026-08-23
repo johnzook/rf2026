@@ -23,6 +23,8 @@ function pickerFeed() {
     rideAt(731, F.FOLLOWED.aulita, 13, 30),
     rideAt(732, 'Extra, Rider', 14, 0),
     rideAt(733, 'Scratched, Sam', 14, 30, 'Scratched'), // searchable, shown as scratched
+    F.entry({ pinny: 734, rider: 'Novice, Nancy', division: 'Open Novice B', divisionShort: 'ONB',
+      details: [F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 16, 0) })] }),
   ];
   // 25 accepted riders matching "matchrider" — search must cap at 20.
   for (let i = 1; i <= 25; i++) {
@@ -114,19 +116,41 @@ test('K46: sheet lists stored riders with Remove; removing deletes from the stor
   } finally { await s.context.close(); }
 });
 
-test('K47: search — ≥2 chars, case-insensitive, top 20, all statuses; Add appends without duplicating', async () => {
+test('K47: browse + filter — full alphabetical list when empty, filter by name/horse/division, all statuses; Add appends without duplicating', async () => {
   const s = await openPage({ server, feed: pickerFeed(), now: NOON });
   try {
     await s.page.click('#edit-riders');
 
+    // Empty box = browse: every entered rider, alphabetical, letter-grouped.
+    const browse = await s.page.evaluate(() => ({
+      rows: [...document.querySelectorAll('#rider-results .rrow span')].map(e => e.textContent),
+      letters: [...document.querySelectorAll('#rider-results .rletter')].map(e => e.textContent),
+    }));
+    assert.equal(browse.rows.length, 30, 'all riders listed with no filter');
+    const names = browse.rows.map(t => t.split(' · ')[0]);
+    assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), 'alphabetical');
+    assert.ok(browse.letters.includes('Z') && browse.letters.includes('M'), 'letter group headers');
+    assert.ok(browse.rows.some(t => t.includes('Novice, Nancy') && t.includes('(ONB)')),
+      'division shown per horse');
+
+    // A single character already filters (the box narrows the browse list).
     await s.page.fill('#rider-search', 'z');
-    assert.equal(await s.page.$eval('#rider-results', el => el.innerHTML), '', 'one char: no results');
+    let rows = await s.page.$$eval('#rider-results .rrow', els => els.map(e => e.textContent));
+    assert.equal(rows.length, 1, 'one char filters');
+    assert.ok(rows[0].includes('Zook, Penelope'));
 
     await s.page.fill('#rider-search', 'ZOOK');
-    let rows = await s.page.$$eval('#rider-results .rrow', els => els.map(e => e.textContent));
+    rows = await s.page.$$eval('#rider-results .rrow', els => els.map(e => e.textContent));
     assert.equal(rows.length, 1, 'case-insensitive substring match');
-    assert.ok(rows[0].includes('Zook, Penelope'));
     assert.ok(await s.page.$('#rider-results button.rm'), 'followed rider offers Remove');
+
+    // Division filters browse a level; horse names match too.
+    await s.page.fill('#rider-search', 'open novice');
+    rows = await s.page.$$eval('#rider-results .rrow', els => els.map(e => e.textContent));
+    assert.deepEqual(rows.map(t => t.split(' · ')[0]), ['Novice, Nancy'], 'full division name filters');
+    await s.page.fill('#rider-search', 'onb');
+    rows = await s.page.$$eval('#rider-results .rrow', els => els.map(e => e.textContent));
+    assert.deepEqual(rows.map(t => t.split(' · ')[0]), ['Novice, Nancy'], 'short division filters');
 
     await s.page.fill('#rider-search', 'extra');
     assert.ok(await s.page.$('#rider-results button.rbtn.add'), 'unfollowed rider offers Add');
@@ -139,7 +163,7 @@ test('K47: search — ≥2 chars, case-insensitive, top 20, all statuses; Add ap
       hasAdd: !!el.querySelector('button.rbtn.add'),
     }));
     assert.ok(scr.text.includes('Scratched, Sam'));
-    assert.ok(scr.text.includes('Test Horse (scratched)'), 'horse annotated with the status');
+    assert.ok(scr.text.includes('Test Horse (TD, scratched)'), 'horse annotated with division + status');
     assert.equal(scr.dimmed, true, 'no accepted entries → dimmed');
     assert.equal(scr.hasAdd, true, 'still addable');
 
@@ -164,7 +188,7 @@ test('K47: search — ≥2 chars, case-insensitive, top 20, all statuses; Add ap
 
     await s.page.fill('#rider-search', 'matchrider');
     rows = await s.page.$$eval('#rider-results .rrow', els => els.length);
-    assert.equal(rows, 20, 'capped at top 20 of 25 matches');
+    assert.equal(rows, 25, 'no cap — the filtered list shows every match');
 
     // Add appends exactly once; a repeated Add cannot duplicate the name
     // (the sheet re-render flips the button to Remove, and the handler's
@@ -270,7 +294,7 @@ test('K47: a rider with accepted AND scratched horses shows undimmed, only the s
     const r = await s.page.$eval('#rider-results .rrow', el => ({
       text: el.textContent.replace(/\s+/g, ' '), dimmed: el.classList.contains('out'),
     }));
-    assert.ok(r.text.includes('Keeper, Benched (scratched)'), r.text);
+    assert.ok(r.text.includes('Keeper (TD), Benched (TD, scratched)'), r.text);
     assert.equal(r.dimmed, false, 'an accepted entry keeps the row full-strength');
     const listRows = await s.page.$$eval('#my-riders-list .rrow', els =>
       els.map(e => e.textContent.replace('Remove', '').trim()));
