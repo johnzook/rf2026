@@ -516,3 +516,15 @@ rides yet" line); these items make the pre-event state first-class.
     hidden) — updated in `render()`, which every follow-list mutation
     (sheet add/remove, share adoption, storage edits) already flows
     through.
+85. Roster cards tap-to-pin a detail popover (same pattern and pin
+    survival as timeline rows — one pinned at a time, re-applied by
+    `data-key` across poll re-renders, `roster|<EntryListId>`): division
+    full name with its accepted-entry count ("(19 entered)"), a Status
+    row for non-accepted entries, ring assignments from any
+    `RidingDetails[].Venues[0].venue` already set pre-times ("Dressage
+    R4 · XC DXC · SJ SJR3", PHASE_SHORT labels), "Stabling with" from
+    `stableWith` when non-empty, pinny when assigned, and a closing
+    "Ride times not posted yet" note. Payment/deficiency fields
+    (`Balance`, `EntryNote`, `requirementCheck`…) are deliberately never
+    shown. Ghost ("no entries found") rows carry no popover and keep the
+    default cursor. All feed strings escaped.

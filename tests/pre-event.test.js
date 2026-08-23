@@ -32,7 +32,10 @@ const preState = page => page.evaluate(() => ({
   leadIn: (el => el && el.textContent)(document.querySelector('#list .pre-note.lead-in')),
   note: (el => el && el.textContent)(document.querySelector('#list .office-note')),
   cards: [...document.querySelectorAll('#list .row.roster')].map(el => ({
-    text: el.textContent.replace(/\s+/g, ' ').trim(),
+    // Card text without the popover's (display:none until pinned/hover).
+    text: (c => { const p = c.querySelector('.pop'); if (p) p.remove(); return c.textContent.replace(/\s+/g, ' ').trim(); })(el.cloneNode(true)),
+    pop: (p => p && [...p.querySelectorAll('h3, .pop-sub, td')]
+      .map(x => x.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | '))(el.querySelector('.pop')),
     out: el.classList.contains('out'),
     opacity: getComputedStyle(el).opacity,
     pinnyBold: (b => b && b.textContent)(el.querySelector('.horse b')),
@@ -234,5 +237,47 @@ test('84: header follow-count label tracks the stored list on the normal timelin
     await s.page.fill('#rider-search', 'aulita');
     await s.page.click(`#rider-results button.rbtn.add[data-n="${F.FOLLOWED.aulita}"]`);
     assert.equal(await label(), '＋ my riders (9)');
+  } finally { await s.context.close(); }
+});
+
+test('85: roster cards tap-to-pin a detail popover — division size, ring assignments, stabling, status; pin survives re-render; ghosts have none', async () => {
+  const ringed = ['Dressage', 'Cross Country', 'Show Jumping'].map((phase, i) =>
+    F.ridingDetail({ phase, venue: ['R4', 'DXC', 'SJR3'][i], time: '' }));
+  const feed = F.feed([
+    { ...preEntry(F.FOLLOWED.zook, 'Eddy'), RidingDetails: ringed, stableWith: 'Brittany Aulita' },
+    preEntry('Peer, One', 'H1'), preEntry('Peer, Two', 'H2'),          // same division: 3 accepted total
+    preEntry(F.FOLLOWED.crocker, 'LS Chez Bond', { status: 'Scratched' }),
+  ]);
+  const s = await openPage({
+    server, feed, eventId: PRE_EVENT_ID, now: NOON,
+    riders: [F.FOLLOWED.zook, F.FOLLOWED.crocker, 'Ghost, Nobody'],
+  });
+  try {
+    const r = await preState(s.page);
+    assert.equal(r.cards.length, 3);
+    assert.ok(r.cards[0].pop.includes('Division | Open Beginner Novice B (3 entered)'), r.cards[0].pop);
+    assert.ok(r.cards[0].pop.includes('Rings | Dressage R4 · XC DXC · SJ SJR3'), 'phase venues shown pre-times');
+    assert.ok(r.cards[0].pop.includes('Stabling with | Brittany Aulita'));
+    assert.ok(r.cards[0].pop.includes('Ride times not posted yet'));
+    assert.ok(!r.cards[0].pop.includes('Status'), 'accepted entry shows no status row');
+    // Scratched card: status row, no rings (null venues), not counted in "entered".
+    assert.ok(r.cards[1].pop.includes('Status | scratched'), r.cards[1].pop);
+    assert.ok(!r.cards[1].pop.includes('Rings'));
+    // Ghost row: no popover, default cursor.
+    assert.equal(r.cards[2].pop, null);
+    assert.equal(await s.page.$eval('#list .row.roster.out:not(.has-pop)', el =>
+      getComputedStyle(el).cursor), 'default');
+
+    // Tap pins; a second tap unpins; the pin survives a poll re-render.
+    const card = '#list .row.roster.has-pop';
+    await s.page.click(card);
+    assert.equal(await s.page.$eval(card, el => el.classList.contains('pinned')), true);
+    assert.equal(await s.page.$eval(`${card} .pop`, el => getComputedStyle(el).display), 'block');
+    await s.page.evaluate(() => render());
+    assert.equal(await s.page.$eval(card, el => el.classList.contains('pinned')), true,
+      'pin survives the 20s poll re-render');
+    await s.page.click(card);
+    assert.equal(await s.page.$eval(card, el => el.classList.contains('pinned')), false);
+    assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
 });
