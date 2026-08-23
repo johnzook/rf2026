@@ -156,6 +156,7 @@
   #rider-search { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 4px; font-family: inherit; }
   .rrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
   .rrow.out > span { opacity: .55; }
+  .rletter { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--muted); padding: 10px 0 2px; }
   .rrow small { color: var(--muted); }
   .rbtn { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap; }
   .rbtn.add { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -227,7 +228,7 @@
         <span id="share-copied" class="rtag" hidden>copied</span>
       </div>
     </div>
-    <input id="rider-search" placeholder="Search rider name…" autocomplete="off">
+    <input id="rider-search" placeholder="Filter by rider, horse, or division…" autocomplete="off">
     <div id="rider-results"></div>
   </div>
 </div>
@@ -523,7 +524,10 @@ function buildRiderIndex(feed) {
   for (const e of feed.EntryList || []) {
     if (!e.RiderName) continue;
     if (!m.has(e.RiderName)) m.set(e.RiderName, []);
-    m.get(e.RiderName).push({ horse: e.HorseName, status: e.Status });
+    m.get(e.RiderName).push({
+      horse: e.HorseName, status: e.Status,
+      division: e.Division, divisionShort: e.DivisionShortName,
+    });
   }
   allRiders = [...m.entries()].map(([name, entries]) => ({
     name,
@@ -1548,23 +1552,43 @@ function renderRiderSheet() {
     document.getElementById("share-sms").href = "sms:?&body=" + encodeURIComponent(url);
     document.getElementById("share-copied").hidden = true;
   }
+  // Browse-first: with no filter text, EVERY entered rider is listed
+  // (alphabetical, letter-grouped). Typing narrows by rider name, horse,
+  // or division (full or short) — so "novice" browses a level.
   const q = document.getElementById("rider-search").value.trim().toLowerCase();
   const resEl = document.getElementById("rider-results");
-  if (q.length < 2) { resEl.innerHTML = ""; return; }
   const followedNow = new Set(current);
-  const hits = allRiders.filter(r => r.name.toLowerCase().includes(q)).slice(0, 20);
-  resEl.innerHTML = hits.length
-    ? hits.map(r => {
-        const action = followedNow.has(r.name)
-          ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
-          : `<button class="rbtn add" data-n="${esc(r.name)}">Add</button>`;
-        // Non-accepted horses annotated in place; a rider with no accepted
-        // entries at all also dims (still addable — scratches un-scratch).
-        const horses = r.entries.map(x =>
-          x.status === "Accepted" ? esc(x.horse) : `${esc(x.horse)} (${esc(String(x.status || "scratched").toLowerCase())})`);
-        return `<div class="rrow${r.anyAccepted ? "" : " out"}"><span>${esc(r.name)}<small> · ${horses.join(", ")}</small></span>${action}</div>`;
-      }).join("")
-    : `<div class="sheet-sub">No match.</div>`;
+  const inRider = (r) =>
+    r.name.toLowerCase().includes(q) ||
+    r.entries.some(x =>
+      String(x.horse || "").toLowerCase().includes(q) ||
+      String(x.division || "").toLowerCase().includes(q) ||
+      String(x.divisionShort || "").toLowerCase().includes(q));
+  const hits = q ? allRiders.filter(inRider) : allRiders;
+  if (!hits.length) {
+    resEl.innerHTML = `<div class="sheet-sub">${allRiders.length ? "No match." : "Entry list not loaded yet."}</div>`;
+    return;
+  }
+  let html = "";
+  let letter = "";
+  for (const r of hits) {
+    const L = (r.name[0] || "#").toUpperCase();
+    if (L !== letter) { letter = L; html += `<div class="rletter">${esc(L)}</div>`; }
+    const action = followedNow.has(r.name)
+      ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
+      : `<button class="rbtn add" data-n="${esc(r.name)}">Add</button>`;
+    // Each horse carries its division; non-accepted horses annotated in
+    // place. A rider with no accepted entries at all also dims (still
+    // addable — scratches un-scratch).
+    const horses = r.entries.map(x => {
+      const bits = [x.divisionShort ? esc(x.divisionShort) : null,
+                    x.status !== "Accepted" ? esc(String(x.status || "scratched").toLowerCase()) : null]
+        .filter(Boolean);
+      return `${esc(x.horse)}${bits.length ? ` (${bits.join(", ")})` : ""}`;
+    });
+    html += `<div class="rrow${r.anyAccepted ? "" : " out"}"><span>${esc(r.name)}<small> · ${horses.join(", ")}</small></span>${action}</div>`;
+  }
+  resEl.innerHTML = html;
 }
 
 document.getElementById("edit-riders").addEventListener("click", () => {
