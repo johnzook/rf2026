@@ -36,9 +36,10 @@ function unscheduledDetails(phases = ['Dressage', 'Cross Country', 'Show Jumping
 // One EntryList item. `details` is an array of ridingDetail() objects.
 function entry({
   pinny, rider, horse = 'Test Horse', division = 'Test Division',
-  divisionShort = 'TD', status = 'Accepted', details = [],
+  divisionShort = 'TD', status = 'Accepted', details = [], stableWith = null,
 }) {
   return {
+    stableWith,
     EntryListId: 40000 + (pinny || 0),
     PinnyNumber: pinny,
     RiderName: rider,

@@ -107,6 +107,7 @@
   /* Pre-schedule roster: entries exist but no ride times posted yet */
   .pre-note { color: var(--muted); font-size: 13px; margin: 4px 2px 12px; }
   .row.roster { grid-template-columns: 1fr auto; cursor: default; }
+  .row.roster.has-pop { cursor: pointer; }
 
   /* Detail popover: shows on hover (pointer devices) or when pinned by tap/click */
   .pop {
@@ -963,6 +964,14 @@ function render() {
       // followed entry carries a ride time yet — show the entry roster so
       // the page is useful before ShowConnect publishes the schedule.
       list.innerHTML = preScheduleHTML(followingNow);
+      // Roster cards carry the same popover pattern as timeline rows:
+      // re-apply a surviving pin, then wire tap-to-pin.
+      if (pinnedKey) {
+        for (const rowEl of list.querySelectorAll(".row[data-key]")) {
+          if (rowEl.dataset.key === pinnedKey) { rowEl.classList.add("pinned"); break; }
+        }
+      }
+      attachRowPins(list);
     } else {
       list.innerHTML = `<div class="empty">${rides.length === 0
         ? "No scheduled rides yet for the followed riders."
@@ -1107,7 +1116,14 @@ function render() {
   }
   updateNowBtn();
 
-  // Tap/click pins the popover open (hover already shows it on desktop).
+  attachRowPins(list);
+
+  updateStatusLine();
+}
+
+// Tap/click pins the popover open (hover already shows it on desktop).
+// Shared by the timeline and the pre-schedule roster.
+function attachRowPins(list) {
   for (const rowEl of list.querySelectorAll(".row")) {
     rowEl.addEventListener("click", ev => {
       if (ev.target.closest(".pop")) return;
@@ -1116,8 +1132,6 @@ function render() {
       if (!wasPinned) rowEl.classList.add("pinned");
     });
   }
-
-  updateStatusLine();
 }
 
 // Status line, shared by EVERY render path (timeline, empty day, roster,
@@ -1161,6 +1175,12 @@ function updateFollowLabel(n) {
 // as the rider-sheet annotation). All feed strings escaped.
 function preScheduleHTML(following) {
   const entries = (lastFeed && Array.isArray(lastFeed.EntryList)) ? lastFeed.EntryList : [];
+  // Accepted entries per division — "19 entered" context in the popover.
+  const divCount = new Map();
+  for (const e of entries) {
+    if (!e || e.Status !== "Accepted" || !e.Division) continue;
+    divCount.set(e.Division, (divCount.get(e.Division) || 0) + 1);
+  }
   const cards = [];
   for (const name of following) {
     const mine = entries.filter(e => e && e.RiderName === name);
@@ -1177,8 +1197,28 @@ function preScheduleHTML(following) {
     for (const e of mine) {
       const outNote = e.Status !== "Accepted"
         ? ` · ${esc(String(e.Status || "").toLowerCase())}` : "";
+      // Ring assignments arrive before ride times do: any phase already
+      // carrying a venue is worth showing.
+      const rings = (Array.isArray(e.RidingDetails) ? e.RidingDetails : [])
+        .map(rd => {
+          const v = rd && Array.isArray(rd.Venues) && rd.Venues[0] ? rd.Venues[0].venue : null;
+          if (!v) return null;
+          const label = mapGet(PHASE_SHORT, rd.Phase) ?? rd.Phase;
+          return `${esc(label)} ${esc(v)}`;
+        })
+        .filter(Boolean);
+      const n = divCount.get(e.Division);
+      const popRows = [
+        `<tr><td>Division</td><td>${esc(e.Division || "—")}${n ? ` (${n} entered)` : ""}</td></tr>`,
+        outNote ? `<tr><td>Status</td><td>${esc(String(e.Status).toLowerCase())}</td></tr>` : "",
+        rings.length ? `<tr><td>Rings</td><td>${rings.join(" · ")}</td></tr>` : "",
+        e.stableWith && String(e.stableWith).trim()
+          ? `<tr><td>Stabling with</td><td>${esc(String(e.stableWith).trim())}</td></tr>` : "",
+        e.PinnyNumber != null ? `<tr><td>Pinny</td><td>#${esc(e.PinnyNumber)}</td></tr>` : "",
+        `<tr><td colspan="2" class="pending">Ride times not posted yet</td></tr>`,
+      ].join("");
       cards.push(`
-        <div class="row roster${outNote ? " out" : ""}">
+        <div class="row roster has-pop${outNote ? " out" : ""}" data-key="${esc(`roster|${e.EntryListId != null ? e.EntryListId : `${e.RiderName}|${e.HorseName}`}`)}">
           <div class="who">
             <div class="rider">${esc(e.RiderName)}</div>
             <div class="horse">${esc(e.HorseName)}${e.PinnyNumber != null ? ` · <b>#${esc(e.PinnyNumber)}</b>` : ""}${outNote}</div>
@@ -1186,6 +1226,11 @@ function preScheduleHTML(following) {
           <div class="meta">
             <div class="phase">${esc(e.DivisionShortName || "")}</div>
             <div class="venue">${esc(e.Division || "")}</div>
+          </div>
+          <div class="pop">
+            <h3>${esc(e.RiderName)}</h3>
+            <div class="pop-sub">${esc(e.HorseName)}</div>
+            <table>${popRows}</table>
           </div>
         </div>`);
     }
