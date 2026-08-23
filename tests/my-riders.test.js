@@ -182,7 +182,8 @@ test('K48: a custom stored list persists across reload; a fresh context sees the
     await s.page.click('#my-riders-list button.rm[data-n="Ghost, Nobody"]');
     await s.page.reload();
     await s.page.waitForFunction(() => lastUpdatedMs !== null);
-    assert.ok((await s.page.$eval('#status', el => el.textContent)).endsWith('· 2 riders followed'));
+    assert.match(await s.page.$eval('#status', el => el.textContent),
+      /^Updated \d{1,2}:\d{2} [AP]M$/, 'all found — no suffix (count is in the header label)');
   } finally { await s.context.close(); }
 
   // A fresh context has no stored list: empty state, not any default names.
@@ -220,8 +221,8 @@ test('R4: status counts riders actually found; sheet flags names matching nothin
       render();
       renderRiderSheet();
     });
-    assert.ok((await s.page.$eval('#status', el => el.textContent))
-      .endsWith('· 2 riders followed'));
+    assert.match(await s.page.$eval('#status', el => el.textContent),
+      /^Updated \d{1,2}:\d{2} [AP]M$/, 'all found — no suffix (count is in the header label)');
     const rows2 = await s.page.$$eval('#my-riders-list .rrow', els =>
       els.map(e => e.textContent.replace('Remove', '').trim()));
     assert.deepEqual(rows2, ['Aulita, Brittany', 'Zook, Penelope'], 'no flags when all found');

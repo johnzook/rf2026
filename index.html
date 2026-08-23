@@ -1114,14 +1114,17 @@ function updateStatusLine() {
     // name is visible as "M of N riders found" instead of silently
     // inflating N.
     const found = matchedNames ? matchedNames.size : followedCount;
+    // The header's "my riders (N)" already shows the count, so the status
+    // line only speaks up when something needs saying: nobody followed, or
+    // followed names missing from the feed.
     const followNote = followedCount === 0
       ? "no riders followed yet"
       : found < followedCount
       ? `${found} of ${followedCount} rider${followedCount === 1 ? "" : "s"} found`
-      : `${followedCount} rider${followedCount === 1 ? "" : "s"} followed`;
+      : null;
     statusText = ageMin >= 2
       ? `Showing data from ${clockInEventTz(lastUpdatedMs)} (${ageMin < 60 ? ageMin + " min" : Math.round(ageMin / 60) + " h"} old)`
-      : `Updated ${clockInEventTz(lastUpdatedMs)} · ${followNote}`;
+      : `Updated ${clockInEventTz(lastUpdatedMs)}${followNote ? ` · ${followNote}` : ""}`;
   }
   document.getElementById("status").textContent = statusText;
 }

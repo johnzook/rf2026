@@ -69,7 +69,7 @@ test('83/84: pre-event load with followed riders — roster + lead-in, no chips,
     assert.equal(r.cards[0].out, false);
     assert.equal(r.cards[1].text, 'Aulita, Brittany Ellie OPA Open Preliminary A');
     // THE regression: the early return used to leave the static "Loading…".
-    assert.equal(r.status, 'Updated 12:00 PM · 2 riders followed');
+    assert.equal(r.status, 'Updated 12:00 PM');
     assert.equal(r.label, '＋ my riders (2)', 'header shows the live follow count');
     assert.equal(r.nowBtnHidden, true);
   } finally { await s.context.close(); }
@@ -126,7 +126,7 @@ test('83: roster renders from a warm cache while fully offline', async () => {
     assert.equal(r.leadIn, LEAD_IN);
     assert.equal(r.cards.length, 1);
     assert.equal(r.cards[0].text, 'Zook, Penelope Eddy OBNB Open Beginner Novice B');
-    assert.equal(r.status, 'Updated 11:59 AM · 1 rider followed',
+    assert.equal(r.status, 'Updated 11:59 AM',
       'status stamped from the cache, not left as Loading…');
     assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
@@ -156,7 +156,7 @@ test('84: adding the first rider from the empty state immediately swaps the prom
     assert.equal(r.leadIn, LEAD_IN, 'roster shown immediately');
     assert.equal(r.cards.length, 1);
     assert.equal(r.cards[0].text, 'Zook, Penelope Eddy OBNB Open Beginner Novice B');
-    assert.equal(r.status, 'Updated 12:00 PM · 1 rider followed', 'singular wording');
+    assert.equal(r.status, 'Updated 12:00 PM', 'no follow-count suffix when all found');
     assert.equal(r.label, '＋ my riders (1)');
     assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
