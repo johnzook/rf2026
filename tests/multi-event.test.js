@@ -263,8 +263,8 @@ test('P76: with nobody followed, the page prompts to add riders instead of an em
     await s.page.click('#rider-results button.rbtn.add[data-n="Zook, Penelope"]');
     await s.page.click('#sheet-close');
     assert.ok(await rowInfo(s.page, 731), 'timeline renders after the first add');
-    assert.ok((await s.page.$eval('#status', el => el.textContent))
-      .endsWith('· 1 rider followed'));
+    assert.equal(await s.page.$eval('#status', el => el.textContent),
+      'Updated 12:00 PM', 'no follow-count suffix — the header label carries the count');
   } finally { await s.context.close(); }
 });
 

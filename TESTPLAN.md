@@ -191,9 +191,11 @@ top-level functions directly in a browser context) or a functional test
     every successful event fetch.
 41. With all network blocked and a warm cache, reload still renders rows
     and results; error note "can't reach ShowConnect, retrying" appears.
-42. Status line: fresh data → `Updated H:MM · N riders followed` when
-    every followed name matched at least one accepted entry in the feed,
-    or `Updated H:MM · M of N riders found` when only M of the N did
+42. Status line: fresh data → plain `Updated H:MM` when every followed
+    name matched at least one accepted entry in the feed (the follow
+    count lives only in the header `my riders (N)` control, item 84 —
+    stating it twice was reported as clutter), or
+    `Updated H:MM · M of N riders found` when only M of the N did
     (singular "rider" when N is 1);
     data older than 2 min → `Showing data from H:MM (N min old)` (hours
     form past 60 min). With nobody followed the follow note reads
