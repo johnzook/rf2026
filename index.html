@@ -155,6 +155,7 @@
   .sheet-sub { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
   #rider-search { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 4px; font-family: inherit; }
   .rrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .rrow.out > span { opacity: .55; }
   .rrow small { color: var(--muted); }
   .rbtn { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap; }
   .rbtn.add { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -515,14 +516,26 @@ function effectiveFollowing() {
 // All accepted riders in the feed, for the "my riders" search picker.
 let allRiders = [];
 function buildRiderIndex(feed) {
+  // Every status is indexed (a scratched rider must still be findable in
+  // search — the entry could come back to life); non-Accepted entries
+  // carry their status for annotation.
   const m = new Map();
   for (const e of feed.EntryList || []) {
-    if (e.Status !== "Accepted" || !e.RiderName) continue;
+    if (!e.RiderName) continue;
     if (!m.has(e.RiderName)) m.set(e.RiderName, []);
-    m.get(e.RiderName).push(e.HorseName);
+    m.get(e.RiderName).push({ horse: e.HorseName, status: e.Status });
   }
-  allRiders = [...m.entries()].map(([name, horses]) => ({ name, horses }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  allRiders = [...m.entries()].map(([name, entries]) => ({
+    name,
+    entries,
+    anyAccepted: entries.some(x => x.status === "Accepted"),
+  })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// "scratched"-style word for a rider none of whose entries are Accepted.
+function riderStatusWord(r) {
+  const s = r.entries.find(x => x.status !== "Accepted");
+  return s && s.status ? String(s.status).toLowerCase() : "scratched";
 }
 
 // Flatten EntryList[].RidingDetails[] into ride rows for followed riders.
@@ -1512,10 +1525,16 @@ document.getElementById("share-adopt-ignore").addEventListener("click", () => re
 
 function renderRiderSheet() {
   const current = effectiveFollowing();
-  // Flag names that matched nothing in the loaded feed (typos, withdrawals,
-  // ghost names from a shared link).
-  const noMatch = n => matchedNames && !matchedNames.has(n)
-    ? `<small> · no entries found</small>` : "";
+  // Flag names that matched no accepted entry in the loaded feed: a rider
+  // whose entries all scratched shows the status word; a name with no
+  // entries at all (typo, ghost from a shared link) shows "no entries
+  // found".
+  const riderInfo = new Map(allRiders.map(r => [r.name, r]));
+  const noMatch = n => {
+    if (!matchedNames || matchedNames.has(n)) return "";
+    const info = riderInfo.get(n);
+    return `<small> · ${info ? esc(riderStatusWord(info)) : "no entries found"}</small>`;
+  };
   document.getElementById("my-riders-list").innerHTML = current.length
     ? current.map(n => `<div class="rrow"><span>${esc(n)}${noMatch(n)}</span><button class="rbtn rm" data-n="${esc(n)}">Remove</button></div>`).join("")
     : `<div class="sheet-sub">Not following anyone yet — search below to add.</div>`;
@@ -1539,7 +1558,11 @@ function renderRiderSheet() {
         const action = followedNow.has(r.name)
           ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
           : `<button class="rbtn add" data-n="${esc(r.name)}">Add</button>`;
-        return `<div class="rrow"><span>${esc(r.name)}<small> · ${esc(r.horses.join(", "))}</small></span>${action}</div>`;
+        // Non-accepted horses annotated in place; a rider with no accepted
+        // entries at all also dims (still addable — scratches un-scratch).
+        const horses = r.entries.map(x =>
+          x.status === "Accepted" ? esc(x.horse) : `${esc(x.horse)} (${esc(String(x.status || "scratched").toLowerCase())})`);
+        return `<div class="rrow${r.anyAccepted ? "" : " out"}"><span>${esc(r.name)}<small> · ${horses.join(", ")}</small></span>${action}</div>`;
       }).join("")
     : `<div class="sheet-sub">No match.</div>`;
 }

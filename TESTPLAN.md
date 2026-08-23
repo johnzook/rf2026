@@ -222,9 +222,12 @@ per-event stored list `sc:<id>:riders`, chosen entirely in-app.)*
     deletes the name from `sc:<id>:riders` (a real delete — the removal
     survives reload), drops the rider's rows from the timeline, and can be
     undone only by re-adding.
-47. Search (≥2 chars, case-insensitive substring, top 20, built from
-    accepted entries only) shows Add for unfollowed, Remove for followed;
-    Add appends the name once (already-present names are never
+47. Search (≥2 chars, case-insensitive substring, top 20) indexes entries
+    of EVERY status — a scratched rider must stay findable, since
+    scratches can un-scratch. Non-accepted horses are annotated in place
+    ("Horse (scratched)"); a rider with no accepted entries at all is
+    dimmed but still addable. Shows Add for unfollowed, Remove for
+    followed; Add appends the name once (already-present names are never
     duplicated).
 48. The stored list persists across reload in the same browser profile; a
     fresh browser context sees the empty state. Follower count in status
@@ -274,11 +277,13 @@ per-event stored list `sc:<id>:riders`, chosen entirely in-app.)*
 
 56. Rider-found feedback: `extractRides` records the set of followed
     names that matched at least one accepted entry. Status shows
-    `M of N riders found` when M < N, plain `N riders followed`
-    otherwise; the my-riders sheet appends a muted `· no entries found`
-    to unmatched rows, only once a feed has loaded. The pre-schedule
-    roster (item 83) uses the same `no entries found` wording for
-    followed names with no entries. (Test `R4:`; items 42/48 updated.)
+    `M of N riders found` when M < N, plain `Updated H:MM` otherwise
+    (item 42); the my-riders sheet annotates unmatched rows, only once a
+    feed has loaded: a followed rider whose entries all scratched gets
+    the muted status word (`· scratched`), a name with no entries at all
+    gets `· no entries found`. The pre-schedule roster (item 83) uses the
+    same `no entries found` wording for followed names with no entries.
+    (Test `R4:`; items 42/48 updated.)
 
 57. Active-chip visibility: after rendering the day chips, if the active
     chip is not fully visible inside the scrollable chip row, the row's

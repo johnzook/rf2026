@@ -22,7 +22,7 @@ function pickerFeed() {
     rideAt(730, F.FOLLOWED.zook, 13, 0),
     rideAt(731, F.FOLLOWED.aulita, 13, 30),
     rideAt(732, 'Extra, Rider', 14, 0),
-    rideAt(733, 'Scratched, Sam', 14, 30, 'Scratched'), // must never appear in search
+    rideAt(733, 'Scratched, Sam', 14, 30, 'Scratched'), // searchable, shown as scratched
   ];
   // 25 accepted riders matching "matchrider" — search must cap at 20.
   for (let i = 1; i <= 25; i++) {
@@ -114,7 +114,7 @@ test('K46: sheet lists stored riders with Remove; removing deletes from the stor
   } finally { await s.context.close(); }
 });
 
-test('K47: search — ≥2 chars, case-insensitive, top 20, accepted only; Add appends without duplicating', async () => {
+test('K47: search — ≥2 chars, case-insensitive, top 20, all statuses; Add appends without duplicating', async () => {
   const s = await openPage({ server, feed: pickerFeed(), now: NOON });
   try {
     await s.page.click('#edit-riders');
@@ -131,9 +131,36 @@ test('K47: search — ≥2 chars, case-insensitive, top 20, accepted only; Add a
     await s.page.fill('#rider-search', 'extra');
     assert.ok(await s.page.$('#rider-results button.rbtn.add'), 'unfollowed rider offers Add');
 
+    // Scratched riders ARE searchable (the entry could come back to life),
+    // dimmed, annotated per horse, and still addable.
     await s.page.fill('#rider-search', 'scratched');
-    assert.equal(await s.page.$eval('#rider-results', el => el.textContent.trim()), 'No match.',
-      'non-accepted entries are not searchable');
+    const scr = await s.page.$eval('#rider-results .rrow', el => ({
+      text: el.textContent, dimmed: el.classList.contains('out'),
+      hasAdd: !!el.querySelector('button.rbtn.add'),
+    }));
+    assert.ok(scr.text.includes('Scratched, Sam'));
+    assert.ok(scr.text.includes('Test Horse (scratched)'), 'horse annotated with the status');
+    assert.equal(scr.dimmed, true, 'no accepted entries → dimmed');
+    assert.equal(scr.hasAdd, true, 'still addable');
+
+    // Once followed, the my-riders list says "scratched" — not the
+    // misleading "no entries found" (that stays for true ghosts).
+    await s.page.click('#rider-results button.rbtn.add[data-n="Scratched, Sam"]');
+    await s.page.evaluate(() => {
+      setStoredList(RIDERS_KEY, [...getStoredList(RIDERS_KEY), 'Ghost, Nobody']);
+      rides = extractRides(lastFeed);
+      renderRiderSheet();
+    });
+    const listRows = await s.page.$$eval('#my-riders-list .rrow', els =>
+      els.map(e => e.textContent.replace('Remove', '').trim()));
+    assert.ok(listRows.includes('Scratched, Sam · scratched'), listRows.join(' | '));
+    assert.ok(listRows.includes('Ghost, Nobody · no entries found'));
+    await s.page.evaluate(() => {
+      setStoredList(RIDERS_KEY, getStoredList(RIDERS_KEY)
+        .filter(n => n !== 'Scratched, Sam' && n !== 'Ghost, Nobody'));
+      rides = extractRides(lastFeed);
+      renderRiderSheet();
+    });
 
     await s.page.fill('#rider-search', 'matchrider');
     rows = await s.page.$$eval('#rider-results .rrow', els => els.length);
@@ -226,5 +253,29 @@ test('R4: status counts riders actually found; sheet flags names matching nothin
     const rows2 = await s.page.$$eval('#my-riders-list .rrow', els =>
       els.map(e => e.textContent.replace('Remove', '').trim()));
     assert.deepEqual(rows2, ['Aulita, Brittany', 'Zook, Penelope'], 'no flags when all found');
+  } finally { await s.context.close(); }
+});
+
+test('K47: a rider with accepted AND scratched horses shows undimmed, only the scratched horse annotated, and counts as found', async () => {
+  const feed = F.feed([
+    rideAt(730, F.FOLLOWED.zook, 13, 0),
+    F.entry({ pinny: 750, rider: 'Mixed, Molly', horse: 'Keeper', details: [
+      F.ridingDetail({ phase: 'Dressage', venue: 'R4', time: F.rideTimeStr(2026, 7, 18, 15, 0) })] }),
+    F.entry({ pinny: 751, rider: 'Mixed, Molly', horse: 'Benched', status: 'Scratched', details: [] }),
+  ]);
+  const s = await openPage({ server, feed, now: NOON, riders: ['Zook, Penelope', 'Mixed, Molly'] });
+  try {
+    await s.page.click('#edit-riders');
+    await s.page.fill('#rider-search', 'mixed');
+    const r = await s.page.$eval('#rider-results .rrow', el => ({
+      text: el.textContent.replace(/\s+/g, ' '), dimmed: el.classList.contains('out'),
+    }));
+    assert.ok(r.text.includes('Keeper, Benched (scratched)'), r.text);
+    assert.equal(r.dimmed, false, 'an accepted entry keeps the row full-strength');
+    const listRows = await s.page.$$eval('#my-riders-list .rrow', els =>
+      els.map(e => e.textContent.replace('Remove', '').trim()));
+    assert.ok(listRows.includes('Mixed, Molly'), 'no annotation — she has an accepted ride');
+    assert.match(await s.page.$eval('#status', el => el.textContent),
+      /^Updated \d{1,2}:\d{2} [AP]M$/, 'accepted entry ⇒ counted as found');
   } finally { await s.context.close(); }
 });
