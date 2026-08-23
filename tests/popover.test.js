@@ -180,5 +180,21 @@ test('I39: tap pins exactly one popover; re-tap unpins; clicks inside the popove
     // Tap the pinned row again: unpins.
     await s.page.click(rowSel(708), { position: { x: 10, y: 10 } });
     assert.deepEqual(await pinned(), []);
+
+    // Tap anywhere OUTSIDE a row: dismisses the pin (header, background).
+    await s.page.mouse.move(0, 0); // clear the hover popover left on row 708
+    await s.page.click(rowSel(709), { position: { x: 10, y: 10 } });
+    assert.deepEqual(await pinned(), ['#709']);
+    await s.page.click('header h1');
+    assert.deepEqual(await pinned(), [], 'outside tap dismisses');
+    await s.page.click(rowSel(709), { position: { x: 10, y: 10 } });
+    await s.page.click('main', { position: { x: 5, y: 5 } });
+    assert.deepEqual(await pinned(), [], 'background tap dismisses');
+
+    // Escape dismisses too.
+    await s.page.click(rowSel(709), { position: { x: 10, y: 10 } });
+    assert.deepEqual(await pinned(), ['#709']);
+    await s.page.keyboard.press('Escape');
+    assert.deepEqual(await pinned(), [], 'Escape dismisses');
   } finally { await s.context.close(); }
 });

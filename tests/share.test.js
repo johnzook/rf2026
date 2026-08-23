@@ -215,3 +215,42 @@ test('P79: shared names adopt verbatim (no trimming) with duplicates and whitesp
     assert.equal(new URL(s.page.url()).search, '?event=1187');
   } finally { await s.context.close(); }
 });
+
+test('P78: header share control — hidden with 0 riders, one-tap copy (or native share) from the main page', async () => {
+  const s = await openPage({ server, feed: shareFeed(), now: NOON, riders: null });
+  try {
+    assert.equal(await s.page.$eval('#share-page', el => el.hidden), true, 'nothing to share');
+
+    // Follow someone: the control appears.
+    await s.page.click('#add-riders-btn');
+    await s.page.fill('#rider-search', 'zook');
+    await s.page.click('#rider-results button.rbtn.add[data-n="Zook, Penelope"]');
+    await s.page.click('#sheet-close');
+    assert.equal(await s.page.$eval('#share-page', el => el.hidden), false);
+
+    // No navigator.share (headless): tap copies the share URL + flashes "copied".
+    await s.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await s.page.click('#share-page');
+    await s.page.waitForSelector('#share-page-done', { state: 'visible' });
+    assert.equal(await s.page.evaluate(() => navigator.clipboard.readText()),
+      `${server.url}?event=1187&riders=${encodeURIComponent('Zook, Penelope')}`);
+
+    // With navigator.share available, the tap uses the share sheet instead.
+    const shared = await s.page.evaluate(() => {
+      window.__shared = null;
+      Object.defineProperty(navigator, 'share', {
+        value: d => { window.__shared = d; return Promise.resolve(); }, configurable: true,
+      });
+      document.getElementById('share-page').click();
+      return window.__shared;
+    });
+    assert.equal(shared.title, 'Test Event — riders');
+    assert.ok(shared.url.includes('riders='));
+
+    // Removing the last rider hides it again.
+    await s.page.click('#edit-riders');
+    await s.page.click('#my-riders-list button.rm[data-n="Zook, Penelope"]');
+    await s.page.click('#sheet-close');
+    assert.equal(await s.page.$eval('#share-page', el => el.hidden), true);
+  } finally { await s.context.close(); }
+});
