@@ -60,7 +60,8 @@ minute of deploy, so no one has to manually refresh.
   slot estimates), scores and places checking in live as they post, with a
   progress line ("6 of 17 scores posted · through 10:36 AM") and your
   riders highlighted — so you can watch a round unfold before your rider's
-  own score is up.
+  own score is up. A toggle re-sorts the same round by placing — the live
+  leaderboard mid-round.
 - Times are event-local; countdowns are computed against event-local
   "now", so they're right even for family in other timezones.
 

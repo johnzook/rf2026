@@ -581,3 +581,13 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     delivers new scores updates the progress line and result cells in
     place — including the early-return render branches (empty day,
     roster, nobody followed).
+90. Sort toggle ("running order" / "placing" pills between the progress
+    line and the rows; running order is the default and marked active):
+    "placing" re-sorts to ascending place on this phase's place field —
+    the cumulative standing after the phase, i.e. the live leaderboard
+    mid-round — with not-yet-placed combos following in running order
+    and outs last; rows keep their own time/estimate cells. Applies to
+    timed and SJ-block rounds alike. The choice is a page-lifetime
+    preference: it survives live re-renders and close/reopen (any
+    division), but is not persisted to storage — a reload is back to
+    running order.

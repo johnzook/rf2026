@@ -168,6 +168,54 @@ test('88: SJ block round — reverse-of-standing order, ~slot estimates, outs la
   } finally { await s.context.close(); }
 });
 
+test('90: sort toggle — placing re-sorts to current standing; choice survives re-renders and reopen', async () => {
+  const s = await openPage({ server, feed: dressageFeed(), scoring: dressageScoring(), now: NOON_SAT });
+  try {
+    await s.page.click(ROW_SEL('801|Dressage|2026-07-18'), { position: { x: 10, y: 10 } });
+    await s.page.$eval('.row.pinned .round-link', el => el.click());
+
+    const activeSort = () => s.page.$eval('#round-sort .active', el => el.dataset.sort);
+    assert.equal(await activeSort(), 'order', 'running order is the default');
+
+    // Placing: placed combos ascending (802/803 tied 1st, running-order
+    // tiebreak), then not-yet-placed in running order, out 804 last. Rows
+    // keep their own slot times.
+    await s.page.click('#round-sort [data-sort="place"]');
+    assert.equal(await activeSort(), 'place');
+    let rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => r.rider),
+      ['Alpha, Ann', 'Beta, Bob', 'Delta, Dee', 'Zook, Penelope', 'Gamma, Cat']);
+    assert.equal(rows[2].time, '12:30 PM');
+
+    // A live scoring update re-renders in the chosen sort: Penelope posts
+    // 2nd, moving between the tied leaders and Delta.
+    await s.page.evaluate(() => {
+      const sc = JSON.parse(localStorage.getItem('sc:1187:scoring')).value;
+      sc.ScoringList.push({ CRID: 3, DivisionId: 60, Pinny: 801,
+        DressageScore: '30.5', DressagePlace: '2', FinalPlace: '2' });
+      resultsIdx = buildResultsIndex(sc);
+      render();
+    });
+    rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => r.rider),
+      ['Alpha, Ann', 'Beta, Bob', 'Zook, Penelope', 'Delta, Dee', 'Gamma, Cat']);
+
+    // Close and reopen: the preference sticks for the page's lifetime.
+    await s.page.click('#round-close');
+    await s.page.mouse.move(0, 0); // clear any hover popover before re-clicking
+    await s.page.click(ROW_SEL('801|Dressage|2026-07-18'), { position: { x: 10, y: 10 } });
+    await s.page.$eval('.row.pinned .round-link', el => el.click());
+    assert.equal(await activeSort(), 'place', 'sort choice survives reopen');
+
+    // And back to running order.
+    await s.page.click('#round-sort [data-sort="order"]');
+    rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => r.rider),
+      ['Alpha, Ann', 'Beta, Bob', 'Gamma, Cat', 'Delta, Dee', 'Zook, Penelope']);
+    assert.equal(s.page.__pageError, undefined);
+  } finally { await s.context.close(); }
+});
+
 test('89: an open round sheet updates live as scoring polls land', async () => {
   const s = await openPage({ server, feed: dressageFeed(), scoring: dressageScoring(), now: NOON_SAT });
   try {
