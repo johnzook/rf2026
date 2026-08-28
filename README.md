@@ -55,6 +55,12 @@ minute of deploy, so no one has to manually refresh.
   live results — per-phase scores/places and overall place from the
   `scoringLive` feed as they post. Results are joined on pinny + division
   (never on rider name — the two feeds format names differently).
+- "View round" from a ride's details: the whole division for that phase in
+  running order (ride times; SJ blocks in reverse order of standing, with
+  slot estimates), scores and places checking in live as they post, with a
+  progress line ("6 of 17 scores posted · through 10:36 AM") and your
+  riders highlighted — so you can watch a round unfold before your rider's
+  own score is up.
 - Times are event-local; countdowns are computed against event-local
   "now", so they're right even for family in other timezones.
 

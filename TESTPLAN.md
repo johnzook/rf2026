@@ -535,3 +535,49 @@ rides yet" line); these items make the pre-event state first-class.
     (`Balance`, `EntryNote`, `requirementCheck`…) are deliberately never
     shown. Ghost ("no entries found") rows carry no popover and keep the
     default cursor. All feed strings escaped.
+
+## R. Round view (division progress) (Aug 2026)
+
+Watching one rider, the round itself is the missing context: earlier
+riders' scores post long before yours does, and "6 of 17 posted, through
+10:36" answers both "how far along is the round" and "who's leading" (each
+posted row carries its place). Opened per ride — division + phase — from
+the popover; the sheet reuses the my-riders bottom-sheet pattern.
+
+86. Ride popovers for scored phases (Dressage/XC/SJ — the
+    `PHASE_DONE_FIELD` keys) carry a "view <PHASE_SHORT> round →" link;
+    Phases A/B/C rows and roster (item 85) popovers don't. The link opens
+    the round sheet (`#round-sheet`) titled with the full division name;
+    ✕, backdrop tap, and Escape all close it (Escape also still unpins
+    popovers — both happen on one press). Clicking the link doesn't
+    unpin the row behind it (it's inside `.pop`); clicks elsewhere inside
+    the sheet do, via the existing outside-a-row dismiss — harmless, the
+    sheet covers the popover.
+87. Timed-phase round (Dressage/XC — and SJ divisions with individual
+    times, i.e. not in `sjBlockDivs`): one `.qrow` per Accepted entry of
+    the division, sorted by effective ride time — same override/delay
+    rules as timeline rows (`OVERRIDE_IDX`, venue delays on
+    `DELAY_DATE`), entries without a parseable time last, pinny
+    tiebreak. Each row: time, rider, horse, `#pinny` when assigned, and
+    the phase score + (place) via `resCell` as posted (tie "T" marker
+    from `tiedAt`, em-dash while pending). Out combos (`OUT_WORDS` on
+    `FinalPlace`) keep their slot, dimmed (`.out`), with the status word
+    as the result cell unless this phase's score posted before it
+    happened. Followed riders' rows highlight (`.mine`). Scratched
+    entries and other divisions never appear; all feed strings escaped.
+    The sub line reads "<PHASE_SHORT> · N of M scores posted" (M counts
+    still-competing combos only) plus "· through <time>" — the latest
+    posted slot, a high-water mark, since scores can post out of order —
+    while partial; "· all M scores posted" when complete.
+88. SJ block divisions (shared block-start time, `sjBlockDivs`): rows
+    sort in reverse order of current standing (order of go —
+    `autoEstimate`'s model), still-to-jump combos showing their "~slot"
+    estimate (reusing `autoEstimate`) as the time cell; posted and out
+    rows show no time (the shared block start on every row is noise);
+    outs sort to the end, dimmed. No "through" clause — block phases
+    have no per-rider schedule to measure against.
+89. An open round sheet is live: every `render()` path calls
+    `renderRoundSheet()` (a no-op while closed), so a scoring poll that
+    delivers new scores updates the progress line and result cells in
+    place — including the early-return render branches (empty day,
+    roster, nobody followed).

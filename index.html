@@ -151,15 +151,15 @@
     cursor: pointer; font-family: inherit; white-space: nowrap;
   }
   .hbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  #rider-sheet { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 40; display: flex; align-items: flex-end; }
-  #rider-sheet[hidden] { display: none; }
+  #rider-sheet, #round-sheet { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 40; display: flex; align-items: flex-end; }
+  #rider-sheet[hidden], #round-sheet[hidden] { display: none; }
   .sheet-card {
     background: var(--card); width: 100%; max-width: 640px; margin: 0 auto;
     border-radius: 16px 16px 0 0; padding: 14px 16px 28px;
     max-height: 75vh; overflow-y: auto;
   }
   .sheet-head { display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
-  #sheet-close { border: none; background: none; font-size: 17px; cursor: pointer; color: var(--muted); padding: 4px 8px; }
+  #sheet-close, #round-close { border: none; background: none; font-size: 17px; cursor: pointer; color: var(--muted); padding: 4px 8px; }
   .sheet-sub { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
   #rider-search { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 4px; font-family: inherit; }
   .rrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -171,6 +171,26 @@
   .rbtn.rm { color: var(--delay); }
   .rtag { font-size: 12px; color: var(--muted); white-space: nowrap; }
   a.rbtn { text-decoration: none; color: var(--ink); display: inline-block; }
+
+  /* Round view sheet: a division's phase in running order, scores live */
+  .pop-round { margin-top: 8px; }
+  .round-link {
+    border: none; background: none; padding: 0; color: var(--accent);
+    font-weight: 650; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .qrow {
+    display: grid; grid-template-columns: 66px 1fr auto; gap: 0 10px;
+    align-items: center; padding: 7px 6px; margin: 0 -6px;
+    border-bottom: 1px solid var(--line); font-size: 14px; border-radius: 8px;
+  }
+  .qrow.mine { background: var(--accent-soft); }
+  .qrow.out > div { opacity: .55; }
+  .qrow .qtime { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .qrow .qrider { font-weight: 600; }
+  .qrow .qhorse { font-size: 12px; color: var(--muted); }
+  .qrow .qres { text-align: right; font-variant-numeric: tabular-nums; }
+  .qres .place { font-weight: 700; color: var(--accent); }
+  .qres .pending { color: var(--muted); }
   #share-row { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
   .share-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 2px 0 6px; }
 
@@ -242,6 +262,14 @@
     </div>
     <input id="rider-search" placeholder="Filter by rider, horse, or division…" autocomplete="off">
     <div id="rider-results"></div>
+  </div>
+</div>
+
+<div id="round-sheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head"><b id="round-title">Round</b><button id="round-close" aria-label="Close">✕</button></div>
+    <div id="round-sub" class="sheet-sub"></div>
+    <div id="round-list"></div>
   </div>
 </div>
 
@@ -873,6 +901,11 @@ function popoverHTML(ride, adj, delayMin) {
     : delayMin
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(sched ${fmtClock(ride.when)}, +${delayMin} min ${esc(ride.venue)})</span>`
     : fmtClock(ride.when);
+  // Scored phases link through to the division's round view; Phases A/B/C
+  // carry no scoring fields, so there is no round to show.
+  const roundBtn = mapGet(PHASE_DONE_FIELD, ride.phase)
+    ? `<div class="pop-round"><button class="round-link" data-division="${esc(ride.division)}" data-phase="${esc(ride.phase)}">view ${esc(mapGet(PHASE_SHORT, ride.phase) || ride.phase)} round →</button></div>`
+    : "";
   return `
     <div class="pop">
       <h3>${esc(ride.rider)}</h3>
@@ -883,6 +916,7 @@ function popoverHTML(ride, adj, delayMin) {
         ${ride.est ? `<tr><td>Est. slot</td><td>~${fmtClock(ride.est.when)} (${esc(ride.est.note)})</td></tr>` : ""}
         ${resultsRows}
       </table>
+      ${roundBtn}
     </div>`;
 }
 
@@ -916,6 +950,7 @@ function render() {
     // branch below): the scroll-to-now must not fire later.
     if (lastUpdatedMs !== null) initialScrollDone = true;
     updateNowBtn();
+    renderRoundSheet();
     return;
   }
 
@@ -995,6 +1030,7 @@ function render() {
     if (lastUpdatedMs !== null) initialScrollDone = true;
     updateStatusLine();
     updateNowBtn();
+    renderRoundSheet();
     return;
   }
 
@@ -1130,6 +1166,7 @@ function render() {
   attachRowPins(list);
 
   updateStatusLine();
+  renderRoundSheet();
 }
 
 // Tap/click pins the popover open (hover already shows it on desktop).
@@ -1154,7 +1191,136 @@ document.addEventListener("click", ev => {
   unpinAll();
 });
 document.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") unpinAll();
+  if (ev.key === "Escape") { unpinAll(); closeRoundSheet(); }
+});
+
+// ---- Round view (how a division's phase is progressing) ----
+// Opened from a ride popover's "view round" link: every accepted combo in
+// the division for that phase, in running order, with scores checking in
+// as they post. Every render() path re-renders an open sheet, so it tracks
+// the scoring poll live.
+
+let roundView = null; // { division, phase } while the round sheet is open
+
+function openRoundSheet(division, phase) {
+  roundView = { division, phase };
+  document.getElementById("round-sheet").hidden = false;
+  document.querySelector("#round-sheet .sheet-card").scrollTop = 0;
+  renderRoundSheet();
+}
+function closeRoundSheet() {
+  roundView = null;
+  document.getElementById("round-sheet").hidden = true;
+}
+
+function renderRoundSheet() {
+  if (!roundView) return;
+  const { division, phase } = roundView;
+  document.getElementById("round-title").textContent = division;
+  const scoreField = mapGet(PHASE_DONE_FIELD, phase);
+  const placeField = mapGet(PHASE_PLACE_FIELD, phase);
+  const following = new Set(effectiveFollowing());
+  const entries = ((lastFeed && Array.isArray(lastFeed.EntryList)) ? lastFeed.EntryList : [])
+    .filter(e => e && e.Status === "Accepted" && e.Division === division);
+
+  // One row per combo: effective ride time (same override/delay rules as
+  // the timeline rows), this phase's score/place from the scoring join,
+  // and whether the combo is out of the competition.
+  const combos = entries.map(e => {
+    const rd = (Array.isArray(e.RidingDetails) ? e.RidingDetails : [])
+      .find(d => d && d.Phase === phase);
+    const when = rd ? parseRideTime(rd.RideTimes) : null;
+    const override = OVERRIDE_IDX[`${e.PinnyNumber}|${phase}`] || null;
+    const adj = when ? adjustedTime({
+      when, override, dayKey: isoDay(override || when),
+      venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
+    }).adj : (override || null);
+    const res = resultsIdx[`${e.PinnyNumber}|${division}`];
+    return {
+      rider: e.RiderName, horse: e.HorseName, pinny: e.PinnyNumber,
+      adj, res,
+      posted: res ? !isNaN(parseFloat(res[scoreField])) : false,
+      finalPlace: res ? parseInt(res.FinalPlace, 10) : NaN,
+      out: (res && mapGet(OUT_WORDS, (res.FinalPlace || "").trim())) || null,
+      mine: following.has(e.RiderName),
+      est: null,
+    };
+  });
+
+  // SJ block divisions run in reverse order of current standing (same model
+  // as autoEstimate, whose per-combo slot estimates are reused here);
+  // everything else is individually timed, so the running order is simply
+  // the effective ride times. SJ out combos don't jump — they sort to the
+  // end; timed-phase outs keep their slot, dimmed.
+  const sjBlock = phase === "Show Jumping" && sjBlockDivs.has(division);
+  if (sjBlock) {
+    const fp = c => (c.out || isNaN(c.finalPlace)) ? -1 : c.finalPlace;
+    combos.sort((a, b) => fp(b) - fp(a) || (a.pinny ?? 0) - (b.pinny ?? 0));
+    for (const c of combos) {
+      if (c.out || c.posted || !c.adj) continue;
+      const est = autoEstimate({ phase, division, pinny: c.pinny }, c.adj);
+      if (est) c.est = est.when;
+    }
+  } else {
+    combos.sort((a, b) =>
+      (a.adj ? a.adj.getTime() : Infinity) - (b.adj ? b.adj.getTime() : Infinity)
+      || (a.pinny ?? 0) - (b.pinny ?? 0));
+  }
+
+  // Progress line: posted count over still-competing combos; for timed
+  // phases also the latest slot with a score (scores can post out of
+  // order, so "through" is a high-water mark, not a cursor).
+  const competing = combos.filter(c => !c.out);
+  const posted = competing.filter(c => c.posted);
+  const phaseLabel = mapGet(PHASE_SHORT, phase) || phase;
+  let progress = phaseLabel;
+  if (competing.length) {
+    progress += posted.length === competing.length
+      ? ` · all ${competing.length} scores posted`
+      : ` · ${posted.length} of ${competing.length} scores posted`;
+    const times = posted.map(c => c.adj).filter(Boolean);
+    if (!sjBlock && posted.length < competing.length && times.length) {
+      progress += ` · through ${fmtClock(new Date(Math.max(...times.map(t => t.getTime()))))}`;
+    }
+  }
+  document.getElementById("round-sub").textContent = progress;
+
+  const rowsHTML = combos.map(c => {
+    let resHTML;
+    if (c.posted) {
+      const pl = parseInt(c.res[placeField], 10);
+      resHTML = resCell(c.res[scoreField], c.res[placeField], tiedAt(division, placeField, pl));
+    } else {
+      resHTML = c.out ? esc(c.out) : `<span class="pending">—</span>`;
+    }
+    // SJ block rows only ever show a slot estimate — the shared block
+    // start on every row would be noise.
+    const t = sjBlock ? (c.est ? `~${fmtClock(c.est)}` : "")
+      : (c.adj ? fmtClock(c.adj) : "");
+    return `
+      <div class="qrow${c.out ? " out" : ""}${c.mine ? " mine" : ""}">
+        <div class="qtime">${t}</div>
+        <div class="qwho">
+          <div class="qrider">${esc(c.rider)}</div>
+          <div class="qhorse">${esc(c.horse)}${c.pinny != null ? ` · #${esc(c.pinny)}` : ""}</div>
+        </div>
+        <div class="qres">${resHTML}</div>
+      </div>`;
+  });
+  document.getElementById("round-list").innerHTML = combos.length
+    ? rowsHTML.join("")
+    : `<div class="sheet-sub">No entries found for this division.</div>`;
+}
+
+document.getElementById("round-close").addEventListener("click", closeRoundSheet);
+document.getElementById("round-sheet").addEventListener("click", ev => {
+  if (ev.target.id === "round-sheet") closeRoundSheet(); // backdrop tap
+});
+// The row click handler ignores clicks inside .pop, so the round link gets
+// its own delegated listener (rows are rebuilt on every render).
+document.getElementById("list").addEventListener("click", ev => {
+  const btn = ev.target.closest(".round-link");
+  if (btn) openRoundSheet(btn.dataset.division, btn.dataset.phase);
 });
 
 // Status line, shared by EVERY render path (timeline, empty day, roster,
