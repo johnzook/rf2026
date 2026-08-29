@@ -183,3 +183,80 @@ delays, overrides, estimates, extras } }`, applied only when the viewed
 event matches its key (other entries inert; 1187 kept as the worked
 example). Override-vs-feed drift detection — deferred feature #3, still
 expected to be the hardest part — remains unbuilt.
+
+## Round view (Aug 2026, event 1190 — Equestrians' Institute HT)
+
+Built live during the event, one feature per real spectator question:
+"how far along is the round while my rider's score isn't up?" → the
+round sheet; "who's leading?" → the placing toggle; "where does a clean
+ride land?" → carried scores. TESTPLAN group R (items 86–91) is the
+spec; `tests/round-view.test.js` covers it.
+
+### New API knowledge (verified against the live feeds)
+
+- **Phase score fields are CUMULATIVE running totals, not per-phase
+  penalties.** Verified live: a clean XC leaves the number unchanged
+  (#162: Dressage 34.1 → XCScore 34.1). Per-phase place fields rank
+  exactly those totals, which is why "sort by score" and "sort by place"
+  agree on a finished phase.
+- **`FinalPoints` mid-event is the total through the combo's completed
+  phases** — numeric as soon as dressage posts, `--` before it. So for a
+  combo yet to run a phase, `FinalPoints` IS the score it carries in,
+  and (scores being cumulative) exactly where a clean ride ends up. That
+  one field powers the gray carried scores without walking `PhaseOrder`.
+- **`FinalPlace` ranks `FinalPoints` across the whole division live**, so
+  mid-phase a rider can be XCPlace 1st (of the finishers so far) while
+  FinalPlace 9th (most of the field still carries better dressage).
+- **Do not assume 1187's SJ block times.** 1190 published individual
+  per-rider SJ times (~2-min spacing). The verify-don't-assume
+  `sjBlockDivs` detection (group by division, require >1 identical
+  times) earned its keep: block divisions get reverse-of-standing order
+  + slot estimates, individually timed ones just sort by time.
+- **`PhaseOrder` varies per division within one event** (1190 ran both
+  `d-xc-sj` and `d-sj-xc` divisions the same weekend). Deriving carried
+  score from `FinalPoints` rather than "the previous phase's field"
+  sidesteps this entirely.
+- Scores post in batches and can post out of running order, so the
+  progress line's "through <time>" is a high-water mark, not a cursor.
+
+### Design philosophy (worth keeping for future features)
+
+- **Scope views to one division + one phase, entered from where the user
+  already is.** The round link lives in the ride popover, so the phase
+  is always the one being looked at — no phase chooser, no global
+  "browse rounds" surface, and the timeline remains the only navigation.
+- **One list, several questions.** Running order + posted scores +
+  places answers "how far along", "how did each ride go", and roughly
+  "who's leading" in a single view; the placing toggle exists only for
+  when the leaderboard is the primary question. Resist splitting into
+  more views/tabs.
+- **Provisional data is visually second-class and never outranks
+  official data.** Carried scores render gray with no place; on a score
+  tie the posted result sorts above the carried one (carried is a best
+  case — XC time penalties are common). Same principle as est. slots.
+- **Denominators count still-competing combos only** ("N of M posted"
+  excludes E/W/R…). Accepted quirk: a finished earlier-phase round of a
+  division with later withdrawals reads "all 15 scores posted" though 17
+  rode — mid-weekend the count's job is "is this round still going".
+- **Reuse the page's existing models instead of re-deriving**
+  (`adjustedTime` for delays/overrides, `autoEstimate` for SJ slots,
+  `resCell`/`tiedAt` for score cells, `OUT_WORDS`, the bottom-sheet
+  pattern) so the round view can never disagree with the timeline rows.
+- **Live by default, no new polling.** Every `render()` path re-renders
+  an open sheet (`renderRoundSheet` is a no-op while closed), so the
+  existing 60 s scoring poll drives it.
+- **Fetch the real feeds before building.** Both the carried-score
+  semantics and the individual-SJ-times surprise were confirmed against
+  live payloads first; the synthetic test fixtures were then shaped to
+  match what was observed, not what was assumed.
+
+### Known trade-offs (deliberate, revisit only if they chafe)
+
+1. SJ block "running order" drifts once SJ scores post — order is
+   reverse of CURRENT standing and a clean round moves a rider up the
+   list; the true historical go order isn't recoverable from the feed.
+   Placing is the stable view late in a round.
+2. A phase split across two days would list correctly but show bare
+   clock times with no day labels.
+3. Sort preference (`roundSort`) is page-lifetime only, deliberately not
+   persisted; a reload returns to running order.
