@@ -41,7 +41,9 @@ function dressageScoring() {
       F.scoringRow({ pinny: 802, divisionId: 60, dressageScore: '30.0', dressagePlace: '1', finalPlace: '1' }),
       F.scoringRow({ pinny: 803, divisionId: 60, dressageScore: '30.0', dressagePlace: '1', finalPlace: '1' }),
       F.scoringRow({ pinny: 804, divisionId: 60, finalPlace: 'W' }),
-      // 801 and 805 pending ('--'); no row at all for anyone else.
+      // 805 pending: a row exists but everything (FinalPoints included) is
+      // '--' — the first-phase no-carried-score case. 801 has no row at all.
+      F.scoringRow({ pinny: 805, divisionId: 60 }),
     ],
   });
 }
@@ -52,6 +54,7 @@ const qrows = page => page.$$eval('#round-list .qrow', els => els.map(e => ({
   time: e.querySelector('.qtime').textContent,
   rider: e.querySelector('.qrider').textContent,
   res: e.querySelector('.qres').textContent.replace(/\s+/g, ' ').trim(),
+  carried: !!e.querySelector('.qres .carried'),
 })));
 
 test('86: popover round link on scored phases only; opens/closes the round sheet', async () => {
@@ -113,6 +116,7 @@ test('87: timed-phase round — time order, scores/ties, out in place, mine high
     assert.equal(rows[2].res, 'withdrawn');
     assert.ok(rows[2].classes.includes('out'), 'out combo dimmed in place');
     assert.equal(rows[3].res, '—', 'pending — no score yet');
+    assert.ok(!rows[3].carried, 'first phase: FinalPoints "--" means no carried score');
     assert.equal(rows[4].res, '—', 'no scoring row at all — pending');
     assert.ok(rows[4].classes.includes('mine'), 'followed rider highlighted');
     assert.ok(!rows[0].classes.includes('mine'));
@@ -212,6 +216,62 @@ test('90: sort toggle — placing re-sorts to current standing; choice survives 
     rows = await qrows(s.page);
     assert.deepEqual(rows.map(r => r.rider),
       ['Alpha, Ann', 'Beta, Bob', 'Gamma, Cat', 'Delta, Dee', 'Zook, Penelope']);
+    assert.equal(s.page.__pageError, undefined);
+  } finally { await s.context.close(); }
+});
+
+test('91: carried scores — pending rows show FinalPoints in gray; placing merges by cumulative score', async () => {
+  // Mid-XC: 812 has run (cumulative 34.1, XC 1st of the finishers so far);
+  // 813 and 811 carry their dressage totals in; 814 has no scoring row;
+  // 815 was eliminated on course.
+  const feed = F.feed([
+    F.entry({ pinny: 812, rider: 'Alpha, Ann', horse: 'H812', division: 'Div X', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 0) })] }),
+    F.entry({ pinny: 811, rider: F.FOLLOWED.zook, horse: 'Eddy', division: 'Div X', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 10) })] }),
+    F.entry({ pinny: 813, rider: 'Beta, Bob', horse: 'H813', division: 'Div X', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 20) })] }),
+    F.entry({ pinny: 814, rider: 'Cara, Kit', horse: 'H814', division: 'Div X', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 30) })] }),
+    F.entry({ pinny: 815, rider: 'Dena, Max', horse: 'H815', division: 'Div X', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 40) })] }),
+  ]);
+  const scoring = F.scoring({
+    divisions: [F.division({ id: 62, name: 'Div X' })],
+    rows: [
+      F.scoringRow({ pinny: 812, divisionId: 62, dressageScore: '34.1', dressagePlace: '2',
+        xcScore: '34.1', xcPlace: '1', finalPoints: '34.1', finalPlace: '3' }),
+      F.scoringRow({ pinny: 813, divisionId: 62, dressageScore: '34.1', dressagePlace: '2',
+        finalPoints: '34.1', finalPlace: '4' }),
+      F.scoringRow({ pinny: 811, divisionId: 62, dressageScore: '35.6', dressagePlace: '4',
+        finalPoints: '35.6', finalPlace: '5' }),
+      F.scoringRow({ pinny: 815, divisionId: 62, dressageScore: '30.0', dressagePlace: '1',
+        finalPlace: 'E' }),
+    ],
+  });
+  const s = await openPage({ server, feed, scoring, now: NOON_SAT });
+  try {
+    await s.page.click(ROW_SEL('811|Cross Country|2026-07-18'), { position: { x: 10, y: 10 } });
+    await s.page.$eval('.row.pinned .round-link', el => el.click());
+    assert.equal(await s.page.textContent('#round-sub'),
+      'XC · 1 of 4 scores posted · through 9:00 AM');
+
+    let rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => [r.rider, r.res, r.carried]), [
+      ['Alpha, Ann', '34.1 (1st)', false],   // posted — real result, green place
+      ['Zook, Penelope', '35.6', true],      // carried in gray
+      ['Beta, Bob', '34.1', true],
+      ['Cara, Kit', '—', false],             // no scoring row — nothing to carry
+      ['Dena, Max', 'eliminated', false],    // out shows the status word, never a carried score
+    ], 'running order with gray carried scores');
+
+    // Placing merges by cumulative score — pending combos slot where a
+    // clean ride would land them; posted 812 outranks 813's identical
+    // carried 34.1; no-score 814 follows in running order, out 815 last.
+    await s.page.click('#round-sort [data-sort="place"]');
+    rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => r.rider),
+      ['Alpha, Ann', 'Beta, Bob', 'Zook, Penelope', 'Cara, Kit', 'Dena, Max']);
     assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
 });
