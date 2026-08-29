@@ -604,3 +604,14 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     tie — so mid-round it reads as the provisional leaderboard with
     pending combos slotted where a clean ride would land them. Out
     combos still show their status word, never a carried score.
+92. Placing-view rank column: in the "placing" sort every scored row
+    (posted or carried) shows its provisional standing in the left
+    column — ranked over the merged cumulative scores, equal scores
+    sharing a "T" rank — accent-colored for posted rows, gray (`.prov`)
+    for carried ones; the ride time / slot estimate drops to a small
+    `.qsub` line beneath. The rank deliberately is NOT the feed's phase
+    place: mid-round that counts finishers only, so a posted "1st"
+    can rightly sit 9th on the merged board — hence the score cell also
+    drops its "(place)" parens in this view (score alone), avoiding two
+    contradictory numbers on one row. Rows with no score and out rows
+    keep a bare time cell. Running-order view is unchanged.
