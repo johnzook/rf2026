@@ -187,6 +187,9 @@
   .qrow.mine { background: var(--accent-soft); }
   .qrow.out > div { opacity: .55; }
   .qrow .qtime { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .qtime .qrank { font-size: 14px; font-weight: 700; color: var(--accent); }
+  .qtime .qrank.prov { color: var(--past); }
+  .qtime .qsub { font-size: 11px; }
   .qrow .qrider { font-weight: 600; }
   .qrow .qhorse { font-size: 12px; color: var(--muted); }
   .qrow .qres { text-align: right; font-variant-numeric: tabular-nums; }
@@ -1294,6 +1297,15 @@ function renderRoundSheet() {
     const tier = c => c.out ? 2 : isNaN(score(c)) ? 1 : 0;
     combos.sort((a, b) => tier(a) - tier(b) || score(a) - score(b)
       || (b.posted ? 1 : 0) - (a.posted ? 1 : 0) || a.orderIdx - b.orderIdx);
+    // Provisional standing for every scored row, so the list visibly reads
+    // first→last. Ranked over the merged scores (equal scores share a "T"
+    // rank), NOT the feed's phase place — mid-round that counts finishers
+    // only (a posted "1st of 1" can sit 9th on the merged board).
+    const scored = combos.filter(c => tier(c) === 0);
+    for (const c of scored) {
+      c.rank = 1 + scored.filter(o => score(o) < score(c)).length;
+      c.rankTied = scored.filter(o => score(o) === score(c)).length > 1;
+    }
   }
   for (const btn of document.querySelectorAll("#round-sort [data-sort]")) {
     btn.classList.toggle("active", btn.dataset.sort === roundSort);
@@ -1320,8 +1332,13 @@ function renderRoundSheet() {
   const rowsHTML = combos.map(c => {
     let resHTML;
     if (c.posted) {
+      // In placing view the left-column rank is the standing; the phase
+      // place ("(1st)" among finishers only, mid-round) would contradict
+      // a merged position further down the board, so the score stands
+      // alone there.
       const pl = parseInt(c.res[placeField], 10);
-      resHTML = resCell(c.res[scoreField], c.res[placeField], tiedAt(division, placeField, pl));
+      resHTML = c.rank ? esc(c.res[scoreField])
+        : resCell(c.res[scoreField], c.res[placeField], tiedAt(division, placeField, pl));
     } else {
       resHTML = c.out ? esc(c.out)
         : !isNaN(c.carried) ? `<span class="carried">${esc(c.res.FinalPoints)}</span>`
@@ -1331,9 +1348,14 @@ function renderRoundSheet() {
     // start on every row would be noise.
     const t = sjBlock ? (c.est ? `~${fmtClock(c.est)}` : "")
       : (c.adj ? fmtClock(c.adj) : "");
+    // Placing view: provisional standing on top (gray while carried),
+    // ride time/slot demoted to a small line beneath.
+    const timeCell = c.rank
+      ? `<div class="qrank${c.posted ? "" : " prov"}">${c.rankTied ? "T" : ""}${c.rank}${ordinal(c.rank)}</div>${t ? `<div class="qsub">${t}</div>` : ""}`
+      : t;
     return `
       <div class="qrow${c.out ? " out" : ""}${c.mine ? " mine" : ""}">
-        <div class="qtime">${t}</div>
+        <div class="qtime">${timeCell}</div>
         <div class="qwho">
           <div class="qrider">${esc(c.rider)}</div>
           <div class="qhorse">${esc(c.horse)}${c.pinny != null ? ` · #${esc(c.pinny)}` : ""}</div>

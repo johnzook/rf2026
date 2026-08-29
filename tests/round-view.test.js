@@ -49,13 +49,19 @@ function dressageScoring() {
 }
 
 const ROW_SEL = key => `#list .row[data-key="${key}"]`;
-const qrows = page => page.$$eval('#round-list .qrow', els => els.map(e => ({
-  classes: [...e.classList],
-  time: e.querySelector('.qtime').textContent,
-  rider: e.querySelector('.qrider').textContent,
-  res: e.querySelector('.qres').textContent.replace(/\s+/g, ' ').trim(),
-  carried: !!e.querySelector('.qres .carried'),
-})));
+const qrows = page => page.$$eval('#round-list .qrow', els => els.map(e => {
+  const rank = e.querySelector('.qtime .qrank');
+  const sub = e.querySelector('.qtime .qsub');
+  return {
+    classes: [...e.classList],
+    time: rank ? (sub ? sub.textContent : '') : e.querySelector('.qtime').textContent,
+    rank: rank ? rank.textContent : null,
+    rankProv: rank ? rank.classList.contains('prov') : null,
+    rider: e.querySelector('.qrider').textContent,
+    res: e.querySelector('.qres').textContent.replace(/\s+/g, ' ').trim(),
+    carried: !!e.querySelector('.qres .carried'),
+  };
+}));
 
 test('86: popover round link on scored phases only; opens/closes the round sheet', async () => {
   const s = await openPage({ server, feed: dressageFeed(), scoring: dressageScoring(), now: NOON_SAT });
@@ -272,6 +278,17 @@ test('91: carried scores — pending rows show FinalPoints in gray; placing merg
     rows = await qrows(s.page);
     assert.deepEqual(rows.map(r => r.rider),
       ['Alpha, Ann', 'Beta, Bob', 'Zook, Penelope', 'Cara, Kit', 'Dena, Max']);
+    // Item 92: every scored row shows a provisional rank (merged scores,
+    // ties share a T rank, gray while carried); no-score and out rows get
+    // none, and the score cell drops its "(place)" parens in this view —
+    // 812's among-finishers "(1st)" would contradict its merged T1st/9th
+    // style position.
+    assert.deepEqual(rows.map(r => [r.rank, r.rankProv]), [
+      ['T1st', false], ['T1st', true], ['3rd', true], [null, null], [null, null]]);
+    assert.equal(rows[0].res, '34.1', 'posted score stands alone in placing view');
+    assert.deepEqual(rows.map(r => r.time),
+      ['9:00 AM', '9:20 AM', '9:10 AM', '9:30 AM', '9:40 AM'],
+      'ride times demoted to the sub-line but still shown');
     assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
 });
