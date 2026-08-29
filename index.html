@@ -192,6 +192,7 @@
   .qrow .qres { text-align: right; font-variant-numeric: tabular-nums; }
   .qres .place { font-weight: 700; color: var(--accent); }
   .qres .pending { color: var(--muted); }
+  .qres .carried { color: var(--past); }
   #share-row { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
   .share-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 2px 0 6px; }
 
@@ -1244,10 +1245,15 @@ function renderRoundSheet() {
       venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
     }).adj : (override || null);
     const res = resultsIdx[`${e.PinnyNumber}|${division}`];
+    const posted = res ? !isNaN(parseFloat(res[scoreField])) : false;
     return {
       rider: e.RiderName, horse: e.HorseName, pinny: e.PinnyNumber,
-      adj, res,
-      posted: res ? !isNaN(parseFloat(res[scoreField])) : false,
+      adj, res, posted,
+      // Scores are cumulative, so FinalPoints (the total through a combo's
+      // completed phases) is the score carried into an un-run phase —
+      // exactly where a clean ride would leave them. "--" before the
+      // first phase parses NaN, so a dressage round shows no carried.
+      carried: res && !posted ? parseFloat(res.FinalPoints) : NaN,
       finalPlace: res ? parseInt(res.FinalPlace, 10) : NaN,
       out: (res && mapGet(OUT_WORDS, (res.FinalPlace || "").trim())) || null,
       mine: following.has(e.RiderName),
@@ -1275,15 +1281,19 @@ function renderRoundSheet() {
       || (a.pinny ?? 0) - (b.pinny ?? 0));
   }
 
-  // "Placing" re-sorts to the current standing: this phase's place field is
-  // the cumulative standing after the phase (see donePlaces), so ascending
-  // place is the live leaderboard mid-round. Combos without a place yet
-  // follow in running order; outs go last.
+  // "Placing" merges everyone by cumulative score after this phase —
+  // actual when posted, carried (a clean ride keeps it) when pending — so
+  // mid-round it's the provisional leaderboard, with pending combos slotted
+  // where a clean ride would land them. Posted beats carried on a tie (an
+  // official result outranks a best case). Combos with no score at all
+  // follow in running order; outs go last. On a finished round this equals
+  // ascending place — posted cumulative scores are what the places rank.
   if (roundSort === "place") {
     combos.forEach((c, i) => { c.orderIdx = i; });
-    const pl = c => { const p = parseInt(c.res && c.res[placeField], 10); return isNaN(p) ? 1e9 : p; };
-    const tier = c => c.out ? 2 : pl(c) === 1e9 ? 1 : 0;
-    combos.sort((a, b) => tier(a) - tier(b) || pl(a) - pl(b) || a.orderIdx - b.orderIdx);
+    const score = c => c.posted ? parseFloat(c.res[scoreField]) : c.carried;
+    const tier = c => c.out ? 2 : isNaN(score(c)) ? 1 : 0;
+    combos.sort((a, b) => tier(a) - tier(b) || score(a) - score(b)
+      || (b.posted ? 1 : 0) - (a.posted ? 1 : 0) || a.orderIdx - b.orderIdx);
   }
   for (const btn of document.querySelectorAll("#round-sort [data-sort]")) {
     btn.classList.toggle("active", btn.dataset.sort === roundSort);
@@ -1313,7 +1323,9 @@ function renderRoundSheet() {
       const pl = parseInt(c.res[placeField], 10);
       resHTML = resCell(c.res[scoreField], c.res[placeField], tiedAt(division, placeField, pl));
     } else {
-      resHTML = c.out ? esc(c.out) : `<span class="pending">—</span>`;
+      resHTML = c.out ? esc(c.out)
+        : !isNaN(c.carried) ? `<span class="carried">${esc(c.res.FinalPoints)}</span>`
+        : `<span class="pending">—</span>`;
     }
     // SJ block rows only ever show a slot estimate — the shared block
     // start on every row would be noise.

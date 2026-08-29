@@ -583,11 +583,24 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     roster, nobody followed).
 90. Sort toggle ("running order" / "placing" pills between the progress
     line and the rows; running order is the default and marked active):
-    "placing" re-sorts to ascending place on this phase's place field —
-    the cumulative standing after the phase, i.e. the live leaderboard
-    mid-round — with not-yet-placed combos following in running order
-    and outs last; rows keep their own time/estimate cells. Applies to
-    timed and SJ-block rounds alike. The choice is a page-lifetime
-    preference: it survives live re-renders and close/reopen (any
-    division), but is not persisted to storage — a reload is back to
-    running order.
+    "placing" re-sorts to the leaderboard (item 91's cumulative-score
+    merge — on a finished round that equals ascending place, since the
+    places rank exactly those scores); combos with no score at all
+    follow in running order, outs last; rows keep their own
+    time/estimate cells. Applies to timed and SJ-block rounds alike.
+    The choice is a page-lifetime preference: it survives live
+    re-renders and close/reopen (any division), but is not persisted to
+    storage — a reload is back to running order.
+91. Carried scores. Scoring is cumulative: each phase score field is the
+    running total after that phase (verified live — a clean XC leaves
+    the number unchanged) and `FinalPoints` is the total through a
+    combo's completed phases. A round row whose phase score isn't posted
+    but whose `FinalPoints` is numeric shows it grayed (`.carried`)
+    instead of the pending em-dash — the score carried into the phase,
+    i.e. where a clean ride ends up. Before the first phase
+    `FinalPoints` is `--` (NaN), so a dressage round keeps the em-dash.
+    The "placing" sort merges combos by cumulative score after the
+    phase — actual when posted, carried when pending, posted first on a
+    tie — so mid-round it reads as the provisional leaderboard with
+    pending combos slotted where a clean ride would land them. Out
+    combos still show their status word, never a carried score.
