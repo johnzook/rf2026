@@ -263,13 +263,20 @@ test('91: carried scores — pending rows show FinalPoints in gray; placing merg
       'XC · 1 of 4 scores posted · through 9:00 AM');
 
     let rows = await qrows(s.page);
+    // Item 93: running order shows the SAME merged standing as the placing
+    // view, not the feed's phase place — Ann's XCPlace is "1" (1st of the
+    // one finisher) but Bob carries an identical 34.1 into the phase, so
+    // both read T1st. Carried rows carry a gray provisional place too.
     assert.deepEqual(rows.map(r => [r.rider, r.res, r.carried]), [
-      ['Alpha, Ann', '34.1 (1st)', false],   // posted — real result, green place
-      ['Zook, Penelope', '35.6', true],      // carried in gray
-      ['Beta, Bob', '34.1', true],
-      ['Cara, Kit', '—', false],             // no scoring row — nothing to carry
+      ['Alpha, Ann', '34.1 (T1st)', false],  // posted — accent place
+      ['Zook, Penelope', '35.6 (3rd)', true],// carried score and place in gray
+      ['Beta, Bob', '34.1 (T1st)', true],
+      ['Cara, Kit', '—', false],             // no scoring row — nothing to carry or rank
       ['Dena, Max', 'eliminated', false],    // out shows the status word, never a carried score
-    ], 'running order with gray carried scores');
+    ], 'running order with gray carried scores and merged provisional places');
+    assert.deepEqual(await s.page.$$eval('#round-list .qres .place',
+      els => els.map(e => e.classList.contains('prov'))), [false, true, true],
+      'provisional place gray on carried rows, accent on the posted one');
 
     // Placing merges by cumulative score — pending combos slot where a
     // clean ride would land them; posted 812 outranks 813's identical
@@ -286,9 +293,85 @@ test('91: carried scores — pending rows show FinalPoints in gray; placing merg
     assert.deepEqual(rows.map(r => [r.rank, r.rankProv]), [
       ['T1st', false], ['T1st', true], ['3rd', true], [null, null], [null, null]]);
     assert.equal(rows[0].res, '34.1', 'posted score stands alone in placing view');
+    // Both views agree on every place: the running-order parens above and
+    // the rank column here are the one merged standing.
+    assert.deepEqual(rows.map(r => r.rank), ['T1st', 'T1st', '3rd', null, null]);
     assert.deepEqual(rows.map(r => r.time),
       ['9:00 AM', '9:20 AM', '9:10 AM', '9:30 AM', '9:40 AM'],
       'ride times demoted to the sub-line but still shown');
+    assert.equal(s.page.__pageError, undefined);
+  } finally { await s.context.close(); }
+});
+
+test('93: running order shows the merged provisional place, not the feed\'s finishers-only one', async () => {
+  // Mid-XC, the first combo through the finish has the WORST cumulative
+  // score in the division: XCPlace is "1" (it leads the one finisher) but
+  // three combos carry better dressage totals into the phase, so its real
+  // provisional standing is 4th. The feed place is what running order used
+  // to print — "58.0 (1st)" to a rider sitting last.
+  const feed = F.feed([
+    F.entry({ pinny: 821, rider: 'Alpha, Ann', horse: 'H821', division: 'Div P', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 0) })] }),
+    F.entry({ pinny: 822, rider: F.FOLLOWED.zook, horse: 'Eddy', division: 'Div P', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 10) })] }),
+    F.entry({ pinny: 823, rider: 'Beta, Bob', horse: 'H823', division: 'Div P', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 20) })] }),
+    F.entry({ pinny: 824, rider: 'Cara, Kit', horse: 'H824', division: 'Div P', details: [
+      F.ridingDetail({ phase: 'Cross Country', venue: 'XC', time: F.rideTimeStr(2026, 7, 18, 9, 30) })] }),
+  ]);
+  const scoring = F.scoring({
+    divisions: [F.division({ id: 63, name: 'Div P' })],
+    rows: [
+      F.scoringRow({ pinny: 821, divisionId: 63, dressageScore: '38.0', dressagePlace: '4',
+        xcScore: '58.0', xcPlace: '1', finalPoints: '58.0', finalPlace: '4' }),
+      F.scoringRow({ pinny: 822, divisionId: 63, dressageScore: '30.0', dressagePlace: '1',
+        finalPoints: '30.0', finalPlace: '1' }),
+      F.scoringRow({ pinny: 823, divisionId: 63, dressageScore: '32.0', dressagePlace: '2',
+        finalPoints: '32.0', finalPlace: '2' }),
+      F.scoringRow({ pinny: 824, divisionId: 63, dressageScore: '34.0', dressagePlace: '3',
+        finalPoints: '34.0', finalPlace: '3' }),
+    ],
+  });
+  const s = await openPage({ server, feed, scoring, now: NOON_SAT });
+  try {
+    await s.page.click(ROW_SEL('822|Cross Country|2026-07-18'), { position: { x: 10, y: 10 } });
+    await s.page.$eval('.row.pinned .round-link', el => el.click());
+
+    let rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => [r.rider, r.res]), [
+      ['Alpha, Ann', '58.0 (4th)'],      // NOT the feed's XCPlace "1"
+      ['Zook, Penelope', '30.0 (1st)'],  // carried — where a clean ride leaves her
+      ['Beta, Bob', '32.0 (2nd)'],
+      ['Cara, Kit', '34.0 (3rd)'],
+    ], 'running order ranks over the merged scores, everyone assumed clear');
+
+    // The placing view reorders the rows but reports the same four places.
+    await s.page.click('#round-sort [data-sort="place"]');
+    rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => [r.rider, r.rank]), [
+      ['Zook, Penelope', '1st'], ['Beta, Bob', '2nd'],
+      ['Cara, Kit', '3rd'], ['Alpha, Ann', '4th']]);
+    assert.deepEqual(rows.map(r => r.res), ['30.0', '32.0', '34.0', '58.0'],
+      'placing view keeps the score alone — the rank column carries the place');
+
+    // Once the round finishes, the merged rank IS the feed's phase place:
+    // the posted cumulative scores are exactly what those places rank.
+    await s.page.click('#round-sort [data-sort="order"]');
+    await s.page.evaluate(() => {
+      const sc = JSON.parse(localStorage.getItem('sc:1187:scoring')).value;
+      for (const r of sc.ScoringList) {
+        if (r.Pinny === 821) continue;
+        r.XCScore = r.DressageScore; // clean rides: cumulative unchanged
+        r.XCPlace = String({ 822: 1, 823: 2, 824: 3 }[r.Pinny]);
+      }
+      resultsIdx = buildResultsIndex(sc);
+      render();
+    });
+    rows = await qrows(s.page);
+    assert.deepEqual(rows.map(r => r.res),
+      ['58.0 (4th)', '30.0 (1st)', '32.0 (2nd)', '34.0 (3rd)']);
+    assert.equal(await s.page.$$eval('#round-list .qres .carried', els => els.length), 0,
+      'nothing carried once every score is posted');
     assert.equal(s.page.__pageError, undefined);
   } finally { await s.context.close(); }
 });

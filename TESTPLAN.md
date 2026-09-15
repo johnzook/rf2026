@@ -559,11 +559,12 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     rules as timeline rows (`OVERRIDE_IDX`, venue delays on
     `DELAY_DATE`), entries without a parseable time last, pinny
     tiebreak. Each row: time, rider, horse, `#pinny` when assigned, and
-    the phase score + (place) via `resCell` as posted (tie "T" marker
-    from `tiedAt`, em-dash while pending). Out combos (`OUT_WORDS` on
-    `FinalPlace`) keep their slot, dimmed (`.out`), with the status word
-    as the result cell unless this phase's score posted before it
-    happened. Followed riders' rows highlight (`.mine`). Scratched
+    the phase score + (place) as posted — the place being item 93's
+    merged provisional standing, tie "T" marker included, em-dash while
+    pending. Out combos (`OUT_WORDS` on `FinalPlace`) keep their slot,
+    dimmed (`.out`), with the status word as the result cell unless this
+    phase's score posted before it happened (then the score, with no
+    place — an out combo has no standing to show). Followed riders' rows highlight (`.mine`). Scratched
     entries and other divisions never appear; all feed strings escaped.
     The sub line reads "<PHASE_SHORT> · N of M scores posted" (M counts
     still-competing combos only) plus "· through <time>" — the latest
@@ -609,9 +610,21 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     column — ranked over the merged cumulative scores, equal scores
     sharing a "T" rank — accent-colored for posted rows, gray (`.prov`)
     for carried ones; the ride time / slot estimate drops to a small
-    `.qsub` line beneath. The rank deliberately is NOT the feed's phase
-    place: mid-round that counts finishers only, so a posted "1st"
-    can rightly sit 9th on the merged board — hence the score cell also
-    drops its "(place)" parens in this view (score alone), avoiding two
-    contradictory numbers on one row. Rows with no score and out rows
-    keep a bare time cell. Running-order view is unchanged.
+    `.qsub` line beneath. The score cell drops its "(place)" parens in
+    this view (score alone): the rank already leads the row, so repeating
+    it beside the score is noise. Rows with no score and out rows keep a
+    bare time cell.
+93. One place, both sorts. The provisional standing of item 92 is
+    computed on every render regardless of sort, and it is the ONLY place
+    either view shows — the feed's phase place is never displayed in the
+    round sheet. Mid-round that feed place counts finishers only, so the
+    first combo through a phase reads "1st" however bad its score, while
+    every combo still to run carries a better total: misleading exactly
+    when the round is most worth watching. So running order puts the
+    merged place in parens beside the score (`.qres .place`, gray
+    `.prov` on a carried score, matching the placing view's rank
+    column), and the two sorts always agree on a row's place — only the
+    row order differs. Rows with nothing to rank (no score at all, or
+    out) show no place in either view. On a finished round the merged
+    rank equals the feed's phase place, since those places rank exactly
+    the posted cumulative scores.

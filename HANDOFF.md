@@ -189,7 +189,7 @@ expected to be the hardest part — remains unbuilt.
 Built live during the event, one feature per real spectator question:
 "how far along is the round while my rider's score isn't up?" → the
 round sheet; "who's leading?" → the placing toggle; "where does a clean
-ride land?" → carried scores. TESTPLAN group R (items 86–91) is the
+ride land?" → carried scores. TESTPLAN group R (items 86–93) is the
 spec; `tests/round-view.test.js` covers it.
 
 ### New API knowledge (verified against the live feeds)
@@ -230,18 +230,31 @@ spec; `tests/round-view.test.js` covers it.
   "who's leading" in a single view; the placing toggle exists only for
   when the leaderboard is the primary question. Resist splitting into
   more views/tabs.
+- **A number means the same thing wherever it appears.** Both sorts show
+  the same provisional standing (item 93) — assume-everyone-clear, the
+  merged cumulative scores — and the feed's phase place is shown
+  nowhere in the sheet. Running order originally printed `XCPlace`
+  beside the score, which mid-round ranks the finishers so far: the
+  first combo home read "1st" with the worst score in the division,
+  contradicting the placing view one tap away. Two sorts of one list
+  must not tell two stories; if a derived number is the honest one, use
+  it in every view, not just the one named after it.
 - **Provisional data is visually second-class and never outranks
-  official data.** Carried scores render gray with no place; on a score
-  tie the posted result sorts above the carried one (carried is a best
-  case — XC time penalties are common). Same principle as est. slots.
+  official data.** Carried scores — and the provisional place beside
+  them — render gray, never in the accent color a posted result gets; on
+  a score tie the posted result sorts above the carried one (carried is a
+  best case — XC time penalties are common). Same principle as est. slots.
 - **Denominators count still-competing combos only** ("N of M posted"
   excludes E/W/R…). Accepted quirk: a finished earlier-phase round of a
   division with later withdrawals reads "all 15 scores posted" though 17
   rode — mid-weekend the count's job is "is this round still going".
 - **Reuse the page's existing models instead of re-deriving**
   (`adjustedTime` for delays/overrides, `autoEstimate` for SJ slots,
-  `resCell`/`tiedAt` for score cells, `OUT_WORDS`, the bottom-sheet
-  pattern) so the round view can never disagree with the timeline rows.
+  `ordinal`/`OUT_WORDS`, the bottom-sheet pattern) so the round view can
+  never disagree with the timeline rows. The one deliberate exception is
+  the score cell: the round sheet builds its own (`provPlace`) instead of
+  `resCell`/`tiedAt`, because those render the feed's phase place and the
+  sheet ranks the merged provisional standing instead.
 - **Live by default, no new polling.** Every `render()` path re-renders
   an open sheet (`renderRoundSheet` is a no-op while closed), so the
   existing 60 s scoring poll drives it.

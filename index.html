@@ -194,6 +194,7 @@
   .qrow .qhorse { font-size: 12px; color: var(--muted); }
   .qrow .qres { text-align: right; font-variant-numeric: tabular-nums; }
   .qres .place { font-weight: 700; color: var(--accent); }
+  .qres .place.prov { color: var(--past); }
   .qres .pending { color: var(--muted); }
   .qres .carried { color: var(--past); }
   #share-row { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
@@ -1230,7 +1231,6 @@ function renderRoundSheet() {
   const { division, phase } = roundView;
   document.getElementById("round-title").textContent = division;
   const scoreField = mapGet(PHASE_DONE_FIELD, phase);
-  const placeField = mapGet(PHASE_PLACE_FIELD, phase);
   const following = new Set(effectiveFollowing());
   const entries = ((lastFeed && Array.isArray(lastFeed.EntryList)) ? lastFeed.EntryList : [])
     .filter(e => e && e.Status === "Accepted" && e.Division === division);
@@ -1284,28 +1284,31 @@ function renderRoundSheet() {
       || (a.pinny ?? 0) - (b.pinny ?? 0));
   }
 
-  // "Placing" merges everyone by cumulative score after this phase —
-  // actual when posted, carried (a clean ride keeps it) when pending — so
-  // mid-round it's the provisional leaderboard, with pending combos slotted
-  // where a clean ride would land them. Posted beats carried on a tie (an
-  // official result outranks a best case). Combos with no score at all
-  // follow in running order; outs go last. On a finished round this equals
-  // ascending place — posted cumulative scores are what the places rank.
-  if (roundSort === "place") {
+  // Provisional standing, merging everyone by cumulative score after this
+  // phase — actual when posted, carried (a clean ride keeps it) when
+  // pending — so mid-round it reads as the leaderboard with pending combos
+  // slotted where a clean ride would land them. Ranked over those merged
+  // scores (equal scores share a "T" rank), NOT the feed's phase place:
+  // mid-round that counts finishers only, so an early "1st of 1" would
+  // claim a lead several combos are about to slot ahead of. Computed in
+  // BOTH sorts — the place a row shows can't depend on how the list is
+  // ordered. On a finished round this equals the feed's phase place, since
+  // the posted cumulative scores are exactly what those places rank.
+  const score = c => c.posted ? parseFloat(c.res[scoreField]) : c.carried;
+  const tier = c => c.out ? 2 : isNaN(score(c)) ? 1 : 0;
+  const scored = combos.filter(c => tier(c) === 0);
+  for (const c of scored) {
+    c.rank = 1 + scored.filter(o => score(o) < score(c)).length;
+    c.rankTied = scored.filter(o => score(o) === score(c)).length > 1;
+  }
+  // Placing sort: that same standing as the row order. Posted beats carried
+  // on a tie (an official result outranks a best case); combos with no score
+  // at all follow in running order, outs go last.
+  const placeView = roundSort === "place";
+  if (placeView) {
     combos.forEach((c, i) => { c.orderIdx = i; });
-    const score = c => c.posted ? parseFloat(c.res[scoreField]) : c.carried;
-    const tier = c => c.out ? 2 : isNaN(score(c)) ? 1 : 0;
     combos.sort((a, b) => tier(a) - tier(b) || score(a) - score(b)
       || (b.posted ? 1 : 0) - (a.posted ? 1 : 0) || a.orderIdx - b.orderIdx);
-    // Provisional standing for every scored row, so the list visibly reads
-    // first→last. Ranked over the merged scores (equal scores share a "T"
-    // rank), NOT the feed's phase place — mid-round that counts finishers
-    // only (a posted "1st of 1" can sit 9th on the merged board).
-    const scored = combos.filter(c => tier(c) === 0);
-    for (const c of scored) {
-      c.rank = 1 + scored.filter(o => score(o) < score(c)).length;
-      c.rankTied = scored.filter(o => score(o) === score(c)).length > 1;
-    }
   }
   for (const btn of document.querySelectorAll("#round-sort [data-sort]")) {
     btn.classList.toggle("active", btn.dataset.sort === roundSort);
@@ -1329,19 +1332,22 @@ function renderRoundSheet() {
   }
   document.getElementById("round-sub").textContent = progress;
 
+  // Running-order view puts the provisional standing beside the score, in
+  // parens like a phase place — gray on a carried score, matching the
+  // placing view's rank column. Placing view shows the score alone: the
+  // rank already leads the row, and two copies of it would be noise. Rows
+  // with nothing to rank (no score, or out) show no place at all — the
+  // feed's finishers-only place is never displayed here.
+  const rankText = c => `${c.rankTied ? "T" : ""}${c.rank}${ordinal(c.rank)}`;
+  const provPlace = c => c.rank
+    ? ` <span class="place${c.posted ? "" : " prov"}">(${rankText(c)})</span>` : "";
   const rowsHTML = combos.map(c => {
     let resHTML;
     if (c.posted) {
-      // In placing view the left-column rank is the standing; the phase
-      // place ("(1st)" among finishers only, mid-round) would contradict
-      // a merged position further down the board, so the score stands
-      // alone there.
-      const pl = parseInt(c.res[placeField], 10);
-      resHTML = c.rank ? esc(c.res[scoreField])
-        : resCell(c.res[scoreField], c.res[placeField], tiedAt(division, placeField, pl));
+      resHTML = esc(c.res[scoreField]) + (placeView ? "" : provPlace(c));
     } else {
       resHTML = c.out ? esc(c.out)
-        : !isNaN(c.carried) ? `<span class="carried">${esc(c.res.FinalPoints)}</span>`
+        : !isNaN(c.carried) ? `<span class="carried">${esc(c.res.FinalPoints)}</span>${placeView ? "" : provPlace(c)}`
         : `<span class="pending">—</span>`;
     }
     // SJ block rows only ever show a slot estimate — the shared block
@@ -1350,8 +1356,8 @@ function renderRoundSheet() {
       : (c.adj ? fmtClock(c.adj) : "");
     // Placing view: provisional standing on top (gray while carried),
     // ride time/slot demoted to a small line beneath.
-    const timeCell = c.rank
-      ? `<div class="qrank${c.posted ? "" : " prov"}">${c.rankTied ? "T" : ""}${c.rank}${ordinal(c.rank)}</div>${t ? `<div class="qsub">${t}</div>` : ""}`
+    const timeCell = placeView && c.rank
+      ? `<div class="qrank${c.posted ? "" : " prov"}">${rankText(c)}</div>${t ? `<div class="qsub">${t}</div>` : ""}`
       : t;
     return `
       <div class="qrow${c.out ? " out" : ""}${c.mine ? " mine" : ""}">
