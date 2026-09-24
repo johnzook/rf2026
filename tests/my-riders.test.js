@@ -303,3 +303,52 @@ test('K47: a rider with accepted AND scratched horses shows undimmed, only the s
       /^Updated \d{1,2}:\d{2} [AP]M$/, 'accepted entry ⇒ counted as found');
   } finally { await s.context.close(); }
 });
+
+test('93: riders followed at other events who are entered here lead the sheet, without duplicating in A–Z', async () => {
+  const s = await openPage({
+    server, feed: pickerFeed(), now: NOON,
+    riders: [F.FOLLOWED.zook],
+    localStorage: {
+      'sc:555:riders': JSON.stringify(['Novice, Nancy', F.FOLLOWED.zook, 'Scratched, Sam', 'Ghost, Nobody']),
+      'sc:556:riders': JSON.stringify(['Extra, Rider']),
+      'sc:556:event': '{"not":"a riders list"}',
+    },
+  });
+  try {
+    await s.page.click('#edit-riders');
+    const sheet = () => s.page.evaluate(() => [...document.querySelectorAll('#rider-results > div')].map(el =>
+      el.classList.contains('rletter') ? `#${el.textContent}` : el.querySelector('span').textContent.split(' · ')[0]));
+
+    let items = await sheet();
+    assert.equal(items[0], '#FOLLOWED AT OTHER EVENTS');
+    // Accepted riders from other events' lists, alphabetical; scratched-only
+    // (Scratched, Sam) and absent (Ghost, Nobody) names are left out.
+    assert.deepEqual(items.slice(1, 4), ['Extra, Rider', 'Novice, Nancy', F.FOLLOWED.zook]);
+    assert.ok(items[4].startsWith('#') && items[4] !== '#FOLLOWED AT OTHER EVENTS', 'A–Z resumes after the section');
+    const rest = items.slice(4);
+    for (const n of ['Extra, Rider', 'Novice, Nancy', F.FOLLOWED.zook])
+      assert.ok(!rest.includes(n), `${n} not duplicated in A–Z`);
+    assert.ok(rest.includes('Scratched, Sam'), 'scratched-only rider stays in A–Z');
+    assert.equal(items.filter(x => !x.startsWith('#')).length, 30, 'every rider still listed exactly once');
+
+    // Rows keep their normal buttons: already-followed here → Remove.
+    assert.ok(await s.page.$('#rider-results button.rm[data-n="Zook, Penelope"]'));
+    await s.page.click('#rider-results button.rbtn.add[data-n="Novice, Nancy"]');
+    assert.deepEqual(await stored(s.page), [F.FOLLOWED.zook, 'Novice, Nancy']);
+    items = await sheet();
+    assert.deepEqual(items.slice(0, 4), ['#FOLLOWED AT OTHER EVENTS', 'Extra, Rider', 'Novice, Nancy', F.FOLLOWED.zook],
+      'adding does not move the row');
+
+    // The filter narrows the section too; the header goes when nothing matches.
+    await s.page.fill('#rider-search', 'onb');
+    assert.deepEqual(await sheet(), ['#FOLLOWED AT OTHER EVENTS', 'Novice, Nancy']);
+    await s.page.fill('#rider-search', 'matchrider');
+    items = await sheet();
+    assert.ok(!items.includes('#FOLLOWED AT OTHER EVENTS'));
+
+    // Other events' lists are never written.
+    const others = await s.page.evaluate(() => [localStorage.getItem('sc:555:riders'), localStorage.getItem('sc:556:riders')]);
+    assert.deepEqual(JSON.parse(others[0]), ['Novice, Nancy', 'Zook, Penelope', 'Scratched, Sam', 'Ghost, Nobody']);
+    assert.deepEqual(JSON.parse(others[1]), ['Extra, Rider']);
+  } finally { await s.context.close(); }
+});

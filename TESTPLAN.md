@@ -615,3 +615,13 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     drops its "(place)" parens in this view (score alone), avoiding two
     contradictory numbers on one row. Rows with no score and out rows
     keep a bare time cell. Running-order view is unchanged.
+93. Riders followed at other events float to the top of the rider sheet.
+    Names from every other event's `sc:<id>:riders` list (never the
+    current event's) that have ≥1 accepted entry in this feed lead the
+    browse list under a "FOLLOWED AT OTHER EVENTS" header (alphabetical,
+    same row format and Add/Remove as the A–Z list), and are left out of
+    the A–Z groups below — no duplicate rows. The filter box narrows both
+    parts; the header disappears when no past-followed rider matches.
+    Scratched-only riders and names not in this feed stay out of the
+    section. Read-only: other events' lists are never modified, and
+    nothing is auto-followed.
