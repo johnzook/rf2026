@@ -166,6 +166,7 @@
   .rrow.out > span { opacity: .55; }
   .rletter { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--muted); padding: 10px 0 2px; }
   .rrow small { color: var(--muted); }
+  .rletter.rpast { color: var(--accent); }
   .rbtn { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap; }
   .rbtn.add { background: var(--accent); border-color: var(--accent); color: #fff; }
   .rbtn.rm { color: var(--delay); }
@@ -561,6 +562,20 @@ function setStoredList(key, list) {
 }
 function effectiveFollowing() {
   return RIDERS_KEY ? getStoredList(RIDERS_KEY) : [];
+}
+// Names followed at any OTHER event in this browser (every sc:<id>:riders
+// list except the current one). Read-only: the rider sheet floats these to
+// the top when they're entered here, but nothing is ever copied across.
+function pastFollowedNames() {
+  const names = new Set();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k === RIDERS_KEY || !/^sc:\d+:riders$/.test(k)) continue;
+      for (const n of getStoredList(k)) if (typeof n === "string") names.add(n);
+    }
+  } catch (e) { /* blocked storage — no history */ }
+  return names;
 }
 
 // All accepted riders in the feed, for the "my riders" search picker.
@@ -1868,11 +1883,25 @@ function renderRiderSheet() {
     resEl.innerHTML = `<div class="sheet-sub">${allRiders.length ? "No match." : "Entry list not loaded yet."}</div>`;
     return;
   }
-  let html = "";
+  // Riders followed at other events who are competing here (≥1 accepted
+  // entry) lead the list under their own header, then the A–Z browse
+  // continues without them (no duplicate rows). The filter applies to both.
+  const past = pastFollowedNames();
+  const isPast = r => r.anyAccepted && past.has(r.name);
+  const pastHits = hits.filter(isPast);
+  const restHits = hits.filter(r => !isPast(r));
+  let html = pastHits.length
+    ? `<div class="rletter rpast">FOLLOWED AT OTHER EVENTS</div>` + pastHits.map(riderRowHTML).join("")
+    : "";
   let letter = "";
-  for (const r of hits) {
+  for (const r of restHits) {
     const L = (r.name[0] || "#").toUpperCase();
     if (L !== letter) { letter = L; html += `<div class="rletter">${esc(L)}</div>`; }
+    html += riderRowHTML(r);
+  }
+  resEl.innerHTML = html;
+
+  function riderRowHTML(r) {
     const action = followedNow.has(r.name)
       ? `<button class="rbtn rm" data-n="${esc(r.name)}">Remove</button>`
       : `<button class="rbtn add" data-n="${esc(r.name)}">Add</button>`;
@@ -1885,9 +1914,8 @@ function renderRiderSheet() {
         .filter(Boolean);
       return `${esc(x.horse)}${bits.length ? ` (${bits.join(", ")})` : ""}`;
     });
-    html += `<div class="rrow${r.anyAccepted ? "" : " out"}"><span>${esc(r.name)}<small> · ${horses.join(", ")}</small></span>${action}</div>`;
+    return `<div class="rrow${r.anyAccepted ? "" : " out"}"><span>${esc(r.name)}<small> · ${horses.join(", ")}</small></span>${action}</div>`;
   }
-  resEl.innerHTML = html;
 }
 
 document.getElementById("edit-riders").addEventListener("click", () => {
