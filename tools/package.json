@@ -1,0 +1,8 @@
+{
+  "name": "rf2026-tools",
+  "private": true,
+  "description": "Maintainer tools for snapshot events: fetch the evententries pages once (snapshot-fetch.js) and encrypt them (snapshot-encrypt.js)",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}
