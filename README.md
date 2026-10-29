@@ -44,6 +44,46 @@ Per event:
 Commit to `main`; open pages poll their own URL and auto-reload within a
 minute of deploy, so no one has to manually refresh.
 
+## Hosted schedule snapshots (evententries events)
+
+Shows that run on evententries.com instead of ShowConnect have no public
+feed (their show centers are GWT-RPC apps with no CORS, and their Terms of
+Use forbid systematic retrieval — see `HANDOFF.md`). For those, the page
+supports a **snapshot event**: a maintainer copies the show center's
+"Order of Go" text once and commits it, encrypted, as
+`snapshots/ee-<key>.json`. The repo holds ciphertext only; the key travels
+in the link, so the schedule is reachable by the people it's sent to
+without being republished to the world.
+
+- **Link format:** `?event=ee:<key>&k=<token>` — `<key>` is the show-center
+  id from the evententries link (`…/#ShowCenter<key>`), `<token>` the
+  decryption token. The token is remembered per device, so a bare
+  `?event=ee:<key>` and the last-event resume keep working, and share
+  links from the rider sheet carry it.
+- **Publish:** open the show center's Order of Go tab, select all, copy,
+  save the text to a file *outside the repo* (one cell per line, or
+  tab-separated — both parse), then:
+
+  ```sh
+  node tools/snapshot-encrypt.js --key ZAsNB86e3r89ldK9 \
+    --name "The Eventing Championships at Galway Downs (Oct 2026)" \
+    --start 2026-10-28 --state California --in ~/galway-order-of-go.txt
+  ```
+
+  `--start` is the first day the show can run (weekday names in the text
+  resolve from it); `--state` sets the event timezone. The script prints
+  the token and the link; commit the JSON and send the link.
+- **Re-publish** (SJ order appears after cross-country; a ring gets
+  re-ordered): re-run with the same `--token` so links already sent stay
+  valid, commit, and open pages pick the new file up within a minute.
+- **What you get:** the timeline, day chips, countdowns, rider picking,
+  sharing, the round view's running order, and the delay/override layers.
+  No live results — there is no scoring feed. `EVENT_CONFIGS` entries for
+  these events use the quoted key, e.g. `"ee:ZAsNB86e3r89ldK9": { … }`,
+  with ring names exactly as printed in the order of go.
+- `node tools/snapshot-encrypt.js --decrypt --key <key> --token <token>`
+  prints a snapshot's metadata to check what's published.
+
 ## Features
 
 - Day chips for every day a followed rider has a ride; defaults to today

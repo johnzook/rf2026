@@ -260,3 +260,61 @@ spec; `tests/round-view.test.js` covers it.
    clock times with no day labels.
 3. Sort preference (`roundSort`) is page-lifetime only, deliberately not
    persisted; a reload returns to running order.
+
+## evententries.com findings (Oct 2026, Galway Downs)
+
+Probed for "could the site work with evententries?" (the other major US
+entry/scoring platform — Galway Downs, Kentucky Horse Park, VHC, Waredaca
+and many others enter through it). Verified live:
+
+- **Stack:** evententries.com and its per-show "Show Center" sites are
+  GWT (Google Web Toolkit) apps, Java servlet backend, classes under one
+  `com.kyler.*` namespace. All data moves over **GWT-RPC**: pipe-delimited
+  requests (`7|0|4|<module base>|<serialization policy hash>|<service>|
+  <method>|…`) needing an `X-GWT-Permutation` header, and `//OK[…]`
+  reversed-token responses over a string table. Both hashes change on
+  every recompile. There is no JSON API, documented or otherwise.
+- **The Show Center on evententries.com is just an iframe** of a per-show
+  host: `<id>-<show>.heofeed.com:444`, `….heoshowcenter.com:444` or
+  `….heoshows.com/heoshowcntr` (three generations of the same "HEO Show
+  Center" app — HEO = their desktop "Horse Event Organizer" program, a
+  Firebird database that secretaries schedule and score in). Methods seen:
+  `LoadShowProfile`, `LoadRideTimes`, `LoadOrderOfGo` on
+  `…/heoshowcenter/info`; `LoadShowCenterList`, `LoadScoringShows`,
+  `LoadScoringBoard` on `evententries.com/evententries/sf`. Live scores
+  live on evententries.com itself (`#LiveScores`), per-division boards
+  with pinny, judge marks, XC jump/time, SJ, to-date and final places;
+  a `RefreshSignals` counter is polled for change notification.
+- **No CORS** on either host: replayed requests with a foreign `Origin`
+  return data but no `Access-Control-Allow-Origin`, and the preflight is
+  empty. A static page cannot call them; a server-side proxy would be
+  required (breaking the no-backend property).
+- **Terms of Use** (evententries.com → Terms of Service) prohibit
+  "systematic retrieval of data … to create or compile … a collection,
+  compilation, database" without written permission (info@evententries.com)
+  and redistribution, but allow printing/downloading **one copy** for
+  personal use. It is a very small operation (Laurel, MS; the show
+  secretary's P.O. box), so permission requests are a phone call, not an
+  API program.
+- **Order of Go layout** (what the snapshot parser consumes): per ring
+  heading (`Eucalptus`, `Grand Prix`, `Sycamore`, `XC`, `SJ - Grand Prix`),
+  a section title (`2026 USEA Novice Dressage Test B`, `Cross Country
+  Novice`, `Show Jumping FEI`), a `Judge(s): …` line, then rows of
+  `Pinney / GoTime ("10:00 AM Thu") / Rider ("First Last") / Horse /
+  Division (short code only)`. `Break` rows and pinny-less `Test Ride`
+  rows interleave. Rings repeat only when they change. **SJ sections carry
+  only Breaks until XC is done** (order is reverse of standing, published
+  later) — re-publish the snapshot then. Ride Times tab is the same data
+  per rider ("Last, First"); Live Scores name riders "First Last (USA)".
+  Pinny is unique show-wide, so a pinny+division join would work as on
+  ShowConnect if scores were ever wired in.
+
+**Design chosen:** the one-copy snapshot (section S of TESTPLAN,
+`tools/snapshot-encrypt.js`): a human copies the order of go once, the
+repo hosts it AES-GCM encrypted under a random link token, the page
+decrypts and parses it into the ShowConnect feed shape. No automated
+retrieval from their servers, no proxy, no plaintext in the public repo,
+and everything downstream of `extractRides` reused unchanged. Trade-offs
+accepted: no live results, manual re-publish when the order changes, and
+`"First Last"` rider names (so names followed on ShowConnect events don't
+cross-match in the "followed at other events" header).
