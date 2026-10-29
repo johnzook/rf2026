@@ -173,4 +173,10 @@ async function main() {
   }
 }
 
-main().catch(e => { console.error('error:', e.message); process.exit(1); });
+// Pure helpers are exported for the test suite; the CLI runs only when
+// invoked directly (same pattern as snapshot-encrypt.js).
+module.exports = { parseArgs, fromLine, spacingGuard, MIN_SPACING_MS };
+
+if (require.main === module) {
+  main().catch(e => { console.error('error:', e.message); process.exit(1); });
+}

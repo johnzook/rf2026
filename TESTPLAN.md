@@ -709,14 +709,18 @@ from their site by the page or by a script. Tests build synthetic boards
 
 102. `parseScoreboard(text, feed)` grammar (one cell per line, or
     tab-separated): page chrome before the first board is ignored. A
-    division header is a name-like line followed by a judge line with
-    names (`Judge: …` / `Jdg @ M: …, …`); the column tokens that follow
+    division header is a name-like line carrying a valid division code
+    whose judge line with names (`Judge: …` / `Jdg @ M: …, …`) follows
+    directly or one line later (item 113); the column tokens that follow
     (`#`, `Rider`, `Horse`, 0–3 × `Jdg @ X`, `Dress`, `Score`, `To
     Date`, `Place`, `XC`, `Jump`, `Elapsed`, `Time`, `Stad`, `Pen`,
     `Final`) never read as headers (no colon). The division code is the
     first `(…)` group that runs straight into the event name ("Open
     Novice (OP)The Eventing…"; "… (OT CHAMPS) (M/T-CH)The …" → `M/T-CH`),
-    else the last group. Rows are pinny / rider ("First Last (USA)",
+    else the last group; it is valid only if the order-of-go feed knows
+    that division (or, with no feed, if it is code-shaped: no spaces,
+    ≤14 chars), so a board for an unknown division is ignored when a feed
+    is loaded. Rows are pinny / rider ("First Last (USA)",
     country optional) / horse / only the posted cells (blanks are dropped
     from the copy). With a feed, a row starts only at an integer that is
     a pinny in THIS board's division (so a place cell before the next
@@ -746,8 +750,9 @@ from their site by the page or by a script. Tests build synthetic boards
     earliest ride time (`d`/`xc`/`sj`), with phases not yet in the order
     of go appended in the usual order (SJ posts after XC: "d-xc" →
     "d-xc-sj"; a d-sj-xc division stays d-sj-xc) so a division is never
-    "complete" before its last phase is scheduled; divisions absent from
-    the feed default to `d-xc-sj` in `DivisionsList`.
+    "complete" before its last phase is scheduled; with no feed, boards
+    default to `d-xc-sj` in `DivisionsList` (with a feed, a board for an
+    unknown division is not a header at all — item 102).
 105. Happy path: `fetchScoresSnapshot` (after the schedule, and on the
     `SNAPSHOT_POLL_MS` cadence) reads the file with `cache: "no-store"`,
     decrypts with the stored token, parses against `lastFeed`, rebuilds
@@ -823,3 +828,42 @@ unchanged. Tests use small synthetic pastes (invented names).
 112. Tool: `encryptSnapshot({ schedule })` stores the General Schedule
     text as `schedule` in the schedule plaintext (`""` when absent; a
     scores snapshot never carries one); `--schedule <file>` on the CLI.
+
+### Fetch tool and the browser-rendered board (`tools/snapshot-fetch.js`)
+
+`tools/snapshot-fetch.js` is the copy-paste step done by a headless
+browser, run by hand: it loads the show center's "Order of Go" and
+"General Schedule" tabs and the Live Scores page once, saves their
+`innerText`, and optionally encrypts (`--publish`) and commits
+(`--push`). It is never run on a timer or in CI (Terms of Use); tests
+exercise only its pure helpers and never launch a browser or touch the
+network.
+
+113. Browser-rendered board form: a page's `innerText` puts the event
+    name on its own line under the division line ("CCI Four Star - L
+    (CCI4-L)" / "The Eventing Championships at Galway Downs(Oct. 2026)" /
+    "Jdg @ M: …"), pads cells with blank or tab-only lines, and renders a
+    tied place as "4-T" (or "4T"). `parseScoreboard` accepts the judge
+    line directly after the header or one line later, and parses the
+    split form to the same `DivisionsList`/`ScoringList` as the glued
+    (hand-copied) form. The line BEFORE a header — the "Results are not
+    final…" banner, a zero-score row's horse — and the event-name line
+    (its paren group "Oct. 2026" is not a known division, nor
+    code-shaped) are never taken as the header, with or without a feed.
+    Tie cells are cells (`SB_TIE_RE`/`SB_CELL_RE`), normalized to the
+    bare place in `scoreboardCells` ("2-T" → "2"; a tie followed by more
+    cells keeps its XC block; a tie in the final pair stays numeric, never
+    an out code); ties are re-derived downstream from equal places
+    (`tiedAt` → "T2nd" in the popover and round sheet). Blank and
+    tab-only lines are ignored.
+114. Fetch-tool helpers: `fromLine(text, re)` returns the text from the
+    first line matching `re` onward (page chrome dropped; CRLF
+    normalized; whole text when nothing matches; trailing newline);
+    `parseArgs` reads `--flag value` pairs and the bare `--publish` /
+    `--push` / `--force` switches; `spacingGuard(files, force)` throws
+    when the newest existing output file is younger than 10 minutes
+    (`MIN_SPACING_MS`) unless forced, and passes on a first run or when
+    every file is older.
+115. The tool exports `{ parseArgs, fromLine, spacingGuard,
+    MIN_SPACING_MS }` and runs its CLI only under `require.main ===
+    module`, so requiring it from the suite has no side effects.

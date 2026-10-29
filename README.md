@@ -60,9 +60,44 @@ without being republished to the world.
   decryption token. The token is remembered per device, so a bare
   `?event=ee:<key>` and the last-event resume keep working, and share
   links from the rider sheet carry it.
-- **Publish:** open the show center's Order of Go tab, select all, copy,
-  save the text to a file *outside the repo* (one cell per line, or
-  tab-separated — both parse), then:
+- **Publish / refresh (one command):** `tools/snapshot-fetch.js` does the
+  copy-paste for you — it opens the show center's "Order of Go" and
+  "General Schedule" tabs and the show's Live Scores page in a headless
+  browser, exactly as a visitor's browser would, saves their text, and
+  can encrypt and commit in the same run. One-time setup on the laptop:
+
+  ```sh
+  cd tools && npm install && npx playwright install chromium
+  ```
+
+  Then, from the repo root, whenever you want a fresh copy:
+
+  ```sh
+  node tools/snapshot-fetch.js --key ZAsNB86e3r89ldK9 \
+    --scores-url "https://evententries.com/#LiveScoresg4ODAsyNRb0uodpdkV2Lvg==" \
+    --out ~/galway --publish --push --token <the link token> \
+    --name "The Eventing Championships at Galway Downs (Oct 2026)" \
+    --start 2026-10-28 --state California
+  ```
+
+  It writes `galway-order-of-go.txt`, `galway-general.txt` and
+  `galway-scores.txt` to `~/galway` (outside the repo — keep them there),
+  runs `snapshot-encrypt.js` for both files, and `--push` commits and
+  pushes `snapshots/`. Open pages pick the new files up within a minute.
+  `--start` is the first day the show can run (weekday names in the text
+  resolve from it); `--state` sets the event timezone. Drop `--push` to
+  review before committing, `--only scores` to refresh results alone,
+  `--center <url>` if the show-center iframe can't be read. The tool
+  refuses to run again within 10 minutes of the last fetch (`--force`
+  overrides) — a nudge, not a license.
+- **Posture:** the fetch tool loads the same pages a visitor loads, once,
+  when a person runs it. Never put it on a timer, in CI, or in a loop:
+  evententries' Terms of Use forbid systematic retrieval, and a human
+  pressing the button now and then is the one-copy use they allow.
+- **Manual fallback (first publish, or no browser handy):** open the show
+  center's Order of Go tab, select all, copy, save the text to a file
+  *outside the repo* (one cell per line, or tab-separated — both parse),
+  then:
 
   ```sh
   node tools/snapshot-encrypt.js --key ZAsNB86e3r89ldK9 \
@@ -70,9 +105,9 @@ without being republished to the world.
     --start 2026-10-28 --state California --in ~/galway-order-of-go.txt
   ```
 
-  `--start` is the first day the show can run (weekday names in the text
-  resolve from it); `--state` sets the event timezone. The script prints
-  the token and the link; commit the JSON and send the link.
+  The script prints the token and the link; commit the JSON and send the
+  link. The first publish of an event goes this way (or with the fetch
+  tool minus `--token`: it prints the new token).
 - **Show jumping before its order posts:** evententries publishes the SJ
   order of go only after cross-country, so until then the rows above have
   no SJ times. Copy the show center's "General Schedule" tab the same way
@@ -94,10 +129,11 @@ without being republished to the world.
   `EVENT_CONFIGS` entries for these events use the quoted key, e.g.
   `"ee:ZAsNB86e3r89ldK9": { … }`, with ring names exactly as printed in
   the order of go.
-- **Results (optional):** nothing is live, but you can paste the show's
-  evententries "Live Scores" page (select the whole page, copy, save as
-  text — the chrome and ads are skipped) and publish it under the same
-  token whenever you want fresher results:
+- **Results (optional):** nothing is live, but the fetch tool's
+  `--scores-url` (or a hand paste of the show's evententries "Live
+  Scores" page — select the whole page, copy, save as text; the chrome,
+  ads and the browser's own line breaks are all handled) publishes the
+  board under the same token whenever you want fresher results. By hand:
 
   ```sh
   node tools/snapshot-encrypt.js --scores --key ZAsNB86e3r89ldK9 \
@@ -116,8 +152,9 @@ without being republished to the world.
   to evententries' own page, per division where you gave one, else the
   show-wide page.
 - **Be a good citizen:** every copy here is a person copying a page their
-  terms let them download once. Keep it that way — no scripts on a timer,
-  no scrapers, however slow: their Terms of Use forbid systematic
+  terms let them download once — by hand or by running the fetch tool
+  themselves. Keep it that way — no scripts on a timer, no CI job, no
+  scrapers, however slow: their Terms of Use forbid systematic
   retrieval, and the page itself never contacts their servers.
 - `node tools/snapshot-encrypt.js --decrypt --key <key> --token <token>`
   (add `--scores` for the results file) prints a snapshot's metadata to

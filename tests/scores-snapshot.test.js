@@ -1,5 +1,5 @@
 'use strict';
-// TESTPLAN S102–S108: the optional scores snapshot for snapshot events — a
+// TESTPLAN S102–S108 and S113–S115: the optional scores snapshot for snapshot events — a
 // pasted evententries "Live Scores" board, encrypted under the same link
 // token into snapshots/ee-<key>-scores.json, parsed into the scoringLive
 // shape and joined through buildResultsIndex. Fixtures are small synthetic
@@ -10,6 +10,10 @@ const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { startServer, openPage, closeBrowser, rowInfo } = require('./helpers');
 const { encryptSnapshot, decryptSnapshot } = require('../tools/snapshot-encrypt');
+const fetchTool = require('../tools/snapshot-fetch');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 let server;
 before(async () => { server = await startServer(); });
@@ -292,11 +296,16 @@ test('S104: phase order per division from the feed — unscheduled phases append
         null,
       ] };
       const o = phaseOrderFromFeed(feed);
-      const sb = parseScoreboard('Div E (E)X\nJudge: Y\n#\n4\nA B\nH', feed);
-      return { o, fromBoard: sb.DivisionsList.map(d => d.PhaseOrder), empty: phaseOrderFromFeed(null) };
+      // A board for a division the feed doesn't know: with the feed the
+      // header is not a header at all (code unknown → ignored); with no
+      // feed it is, and its phase order defaults.
+      const withFeed = parseScoreboard('Div E (E)X\nJudge: Y\n#\n4\nA B\nH', feed);
+      const noFeed = parseScoreboard('Div E (E)X\nJudge: Y\n#\n4\nA B\nH', null);
+      return { o, withFeed: withFeed.DivisionsList.map(d => d.PhaseOrder), noFeed: noFeed.DivisionsList.map(d => d.PhaseOrder), empty: phaseOrderFromFeed(null) };
     });
     assert.deepEqual(r.o, { A: 'd-xc-sj', B: 'd-sj-xc', C: 'sj-d-xc' });
-    assert.deepEqual(r.fromBoard, ['d-xc-sj']);
+    assert.deepEqual(r.withFeed, []);
+    assert.deepEqual(r.noFeed, ['d-xc-sj']);
     assert.deepEqual(r.empty, {});
     // And the live page's own divMeta came from the real snapshot feed.
     assert.deepEqual(await s.page.evaluate(() => [divMeta.ON.phaseOrder, divMeta['CCI2-L'].phaseOrder]), ['d-xc-sj', 'd-sj-xc']);
@@ -450,4 +459,126 @@ test('S108: encryptSnapshot kind "scores" requires a token and round-trips; --li
   const bare = await decryptSnapshot((await encryptSnapshot({ key: KEY, token: TOKEN, start: START, text: '' })).payload, TOKEN);
   assert.deepEqual(bare.links, {});
   assert.equal(bare.scoresUrl, '');
+});
+
+// ---- S113: the browser-rendered (innerText) board form ----
+// A headless browser's innerText puts the event name on its own line
+// under the division line, pads cells with tab-only lines, and renders a
+// tied place as "4-T". The line before a header (the "Results are not
+// final" banner, a zero-score row's horse) and the event-name line must
+// never be read as the header.
+
+const EVENT_NAME = 'Snapshot Test Event(Oct. 2026)';
+// Same board as BOARD, in the innerText shape: division line, event-name
+// line, blank/tab-only padding between cells; Bea tied 2nd ("2-T"),
+// Cal's row has no cells and sits right before the next header.
+const SPLIT_BOARD = [
+  'EventEntries.com', 'Home', 'Live Scores', 'ShowsResults are not final and subject to change.', '', '',
+  'Open Novice (ON)', EVENT_NAME, '', '\t', 'Judge: Someone', '', ...COLS_0.flatMap(c => [c, '\t']),
+  '101\t', 'Ada Tester (USA)', 'Horse One', '\t', '18.8', '\t', '1', '\t',
+  '102\t', 'Bea Sample (USA)', 'Horse Two', '22.5', '2-T', '\t',
+  '103\t', 'Eve Code', 'PJ', '\t', '22.5', '2-T',
+  'Beginner Novice (BN CHAMPS) (BN)', EVENT_NAME, 'Judge: Someone', ...COLS_0,
+  '201\t', 'Cal Fixture (USA)', 'Horse Three', '\t',
+  'CCI Two Star - L (CCI2-L)', EVENT_NAME, 'Jdg @ C: A, Jdg @ E: B', ...COLS_2,
+  '301\t', 'Dee Mock (USA)', 'Horse Four', '70.00', '68.13', '31.4', '1',
+  'Test Ride', 'Test Horse 2 Star', '\t', '73.86',
+].join('\n');
+
+test('S113: the innerText board form (split header, tab-only lines, tied places) parses to the same rows as the glued form; banner, horse-before-header and event-name lines are never headers', async () => {
+  await publishSchedule(); await publishScores();
+  const s = await openSnap();
+  try {
+    const glued = await parseBoard(s.page, BOARD);
+    const split = await parseBoard(s.page, SPLIT_BOARD);
+    assert.deepEqual(split.divisions, glued.divisions);
+    assert.deepEqual(split.rows.map(x => [x.pinny, x.div, x.rider, x.horse]),
+      glued.rows.map(x => [x.pinny, x.div, x.rider, x.horse]));
+    assert.equal(split.stats.rows, 5);
+    assert.equal(split.stats.divisions, 3);
+    // No division named after the banner, the event name, or Cal's horse.
+    assert.ok(!split.divisions.some(d => /Results|Snapshot Test|Horse Three|Oct\. 2026/.test(d.DivisionId)),
+      JSON.stringify(split.divisions));
+    // Tied places normalized: "2-T" → "2" for both Bea and Eve, and the
+    // page's tie detection (equal places) picks that up downstream.
+    assert.deepEqual(split.rows[1].d, ['22.5', '2']);
+    assert.deepEqual(split.rows[2].d, ['22.5', '2']);
+    assert.deepEqual(split.rows[1].fin, ['22.5', '2']);
+    // Only the Test Ride lines and the test horse's own orphan score cell are skipped.
+    assert.deepEqual(split.stats.skippedSamples, ['Test Ride', 'Test Horse 2 Star', '73.86']);
+
+    // Without a feed the same holds: the header needs a code-shaped paren
+    // group, which the banner ("no parens"), the event-name line ("Oct. 2026"
+    // has a space) and a horse line lack.
+    const noFeed = await parseBoard(s.page, SPLIT_BOARD, false);
+    assert.deepEqual(noFeed.divisions.map(d => d.DivisionId), ['ON', 'BN', 'CCI2-L']);
+    assert.ok(noFeed.rows.some(x => x.pinny === 201 && x.div === 'BN'));
+  } finally { await s.context.close(); }
+});
+
+test('S113: a tied place followed by more cells keeps its XC block; "4T" is accepted too; a tie in the final pair reads as a plain place', async () => {
+  await publishSchedule(); await publishScores();
+  const s = await openSnap();
+  try {
+    const r = await s.page.evaluate(() => [
+      scoreboardCells(['18.8', '4-T', '0', '6:12', '0.4', '19.2', '3-T'], 0),
+      scoreboardCells(['18.8', '4T'], 0),
+      scoreboardCells(['70.00', '68.13', '31.4', '2-T', '0', '6:12', '0', '31.4', '1', '0', '0', '31.4', '1-T'], 2),
+    ]);
+    assert.deepEqual([r[0].DressageScore, r[0].DressagePlace, r[0].XCScore, r[0].XCPlace, r[0].FinalPlace],
+      ['18.8', '4', '19.2', '3', '3']);
+    assert.deepEqual([r[1].DressagePlace, r[1].FinalPlace], ['4', '4']);
+    assert.deepEqual([r[2].DressagePlace, r[2].XCPlace, r[2].SJPlace, r[2].FinalPlace], ['2', '1', '1', '1']);
+    // The tie suffix is a cell, not an out code: FinalPlace stays numeric.
+    assert.ok(r.every(x => /^\d+$/.test(x.FinalPlace)));
+  } finally { await s.context.close(); }
+});
+
+test('S113: a tied place rendered as "2-T" is shown as a tie in the popover and round sheet via equal places', async () => {
+  await publishSchedule(); await publishScores({ text: SPLIT_BOARD });
+  const s = await openSnap({ riders: ['Ada Tester', 'Bea Sample'] });
+  try {
+    const info = await rowInfo(s.page, 102);
+    assert.match(info.pop, /Dressage\s*22\.5 \(T2nd\)/);
+    await s.page.evaluate(() => openRoundSheet('ON', 'Dressage'));
+    const rows = await s.page.$$eval('#round-list .qrow', els => els.map(e => e.innerText.replace(/\s+/g, ' ').trim()));
+    assert.equal(rows.length, 3);
+    assert.ok(rows.filter(t => /T2nd/.test(t)).length === 2, rows.join(' | '));
+  } finally { await s.context.close(); }
+});
+
+// ---- S114: the fetch tool's pure helpers (no browser, no network) ----
+
+test('S114: fromLine drops page chrome above the table and falls back to the whole text; parseArgs reads flags and values', () => {
+  const { fromLine, parseArgs } = fetchTool;
+  assert.equal(fromLine('Home\nShow Center\n  Pinney\tGoTime\nRing 1\n', /^Pinney\b/i), 'Pinney\tGoTime\nRing 1\n');
+  assert.equal(fromLine('a\r\nb\r\nDate\r\nThu, 10/29\r\n', /^Date\b/i), 'Date\nThu, 10/29\n');
+  assert.equal(fromLine('no match here\nat all', /^Pinney\b/i), 'no match here\nat all\n');
+  assert.equal(fromLine('ShowsResults are not final and subject to change.\nx', /Results are not final/i),
+    'ShowsResults are not final and subject to change.\nx\n');
+  assert.deepEqual(parseArgs(['--key', 'K', '--publish', '--out', '~/g', '--push', 'stray', '--force']),
+    { key: 'K', publish: true, out: '~/g', push: true, force: true });
+});
+
+test('S114: the spacing guard refuses a re-fetch within 10 minutes of the newest output file unless forced, and allows a first run', () => {
+  const { spacingGuard, MIN_SPACING_MS } = fetchTool;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'snapfetch-'));
+  const a = path.join(dir, 'a.txt'), b = path.join(dir, 'b.txt'), missing = path.join(dir, 'nope.txt');
+  assert.doesNotThrow(() => spacingGuard([missing], false), 'nothing written yet');
+  fs.writeFileSync(a, 'x');
+  assert.throws(() => spacingGuard([a, missing], false), /last fetch was 0 min ago; wait 10 min/);
+  assert.doesNotThrow(() => spacingGuard([a, missing], true), '--force');
+  // An old file no longer blocks; the newest file decides.
+  const old = (Date.now() - MIN_SPACING_MS - 60_000) / 1000;
+  fs.utimesSync(a, old, old);
+  assert.doesNotThrow(() => spacingGuard([a], false));
+  fs.writeFileSync(b, 'y');
+  assert.throws(() => spacingGuard([a, b], false));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('S115: requiring the fetch tool as a module never launches the CLI (no browser, no argv parsing side effects)', () => {
+  assert.equal(typeof fetchTool.fromLine, 'function');
+  assert.equal(typeof fetchTool.spacingGuard, 'function');
+  assert.equal(fetchTool.MIN_SPACING_MS, 10 * 60_000);
 });
