@@ -678,8 +678,9 @@ local test server (`server.setFile`) — the committed snapshot is never read.
     tail (rider index, rides, `lastUpdatedMs`, event name/title from the
     snapshot's `name`, `eventTz` derived from its `state` via
     `deriveTz`, cache write, `sc:last-event`). Footer appends the
-    provenance ("Schedule: evententries order of go captured … — no live
-    results"). Results stay empty ("Not posted yet"), no ShowConnect
+    provenance ("Schedule: evententries order of go captured …; results
+    not loaded — nothing here is live"). Results stay empty ("Not posted
+    yet") until a scores snapshot (S102–S108) loads, no ShowConnect
     request is ever made, and the file is re-read every
     `SNAPSHOT_POLL_MS` (a re-published order of go lands by commit).
 99. Cache: the parsed feed (with its `snapshot` meta) is cached at
@@ -696,3 +697,129 @@ local test server (`server.setFile`) — the committed snapshot is never read.
     match both `sc:<digits>:…` and `sc:ee:<key>:…` keys — other events'
     `:event`/`:scoring` blobs are evicted whatever their id shape, every
     `:riders` list and `:k` token is kept.
+
+### Scores snapshot (evententries Live Scores board)
+
+An optional second file, `snapshots/ee-<key>-scores.json`, encrypted under
+the same token (`tools/snapshot-encrypt.js --scores --token <token>`),
+holds a pasted copy of the show's evententries "Live Scores" page. It is
+re-pasted by hand whenever fresher results are wanted — never fetched
+from their site by the page or by a script. Tests build synthetic boards
+(invented names) and serve both files with `server.setFile`.
+
+102. `parseScoreboard(text, feed)` grammar (one cell per line, or
+    tab-separated): page chrome before the first board is ignored. A
+    division header is a name-like line followed by a judge line with
+    names (`Judge: …` / `Jdg @ M: …, …`); the column tokens that follow
+    (`#`, `Rider`, `Horse`, 0–3 × `Jdg @ X`, `Dress`, `Score`, `To
+    Date`, `Place`, `XC`, `Jump`, `Elapsed`, `Time`, `Stad`, `Pen`,
+    `Final`) never read as headers (no colon). The division code is the
+    first `(…)` group that runs straight into the event name ("Open
+    Novice (OP)The Eventing…"; "… (OT CHAMPS) (M/T-CH)The …" → `M/T-CH`),
+    else the last group. Rows are pinny / rider ("First Last (USA)",
+    country optional) / horse / only the posted cells (blanks are dropped
+    from the copy). With a feed, a row starts only at an integer that is
+    a pinny in THIS board's division (so a place cell before the next
+    header, ad copy after a number, and a pinny from another division are
+    not rows, and a horse named like a code — "PJ" — is admitted); without
+    a feed the shape heuristic (integer + two name-like lines) decides.
+    Pinny-less `Test Ride` rows and unrecognized lines are counted in
+    `stats.skipped` with up to 10 `stats.skippedSamples`. Output mirrors
+    scoringLive: `DivisionsList[{DivisionId, DivisionName (= the code,
+    which is the order-of-go feed's `Division`), PhaseOrder}]` and
+    `ScoringList[{Pinny, DivisionId, RiderName, HorseName, …fields}]`;
+    empty or garbage text yields empty lists without throwing.
+103. `scoreboardCells(cells, judges)`: the first `judges` cells are judge
+    marks, then `DressageScore`, `DressagePlace`; the XC block is anchored
+    on the `XC Elapsed` cell (`m:ss`) — `XCScore`/`XCPlace` are the two
+    cells after `XC Time`, whether or not a leading `XC Jump` cell was
+    posted — or, with no elapsed cell but ≥ J+7 cells, positional; the
+    stadium block is whatever follows and its last two cells are
+    `SJScore`/`SJPlace`. `FinalPoints`/`FinalPlace` fall through SJ → XC →
+    dressage. An out code (`E`, `R`, `W`, `RF`, …) anywhere becomes
+    `FinalPlace` and the place of the phase it sits in (after the XC
+    block → SJ, after dressage → XC, else dressage); cells after it are
+    ignored. Missing values are `"--"` (parse to NaN like scoringLive).
+    Known unknown: the XC/SJ cell layout is inferred from the column names
+    and unverified until those phases post.
+104. `phaseOrderFromFeed(feed)`: per division, phases ordered by their
+    earliest ride time (`d`/`xc`/`sj`), with phases not yet in the order
+    of go appended in the usual order (SJ posts after XC: "d-xc" →
+    "d-xc-sj"; a d-sj-xc division stays d-sj-xc) so a division is never
+    "complete" before its last phase is scheduled; divisions absent from
+    the feed default to `d-xc-sj` in `DivisionsList`.
+105. Happy path: `fetchScoresSnapshot` (after the schedule, and on the
+    `SNAPSHOT_POLL_MS` cadence) reads the file with `cache: "no-store"`,
+    decrypts with the stored token, parses against `lastFeed`, rebuilds
+    `resultsIdx`, caches, and re-renders: ride popovers show the per-phase
+    and Overall result rows, the round sheet shows places and "all N
+    scores posted", and the footer says "results captured <capturedAt>".
+    Live-scores link: `liveScoresUrl(division)` is the schedule snapshot's
+    `links[code]` if present, else its `scoresUrl`, and only if http(s);
+    rendered as `live scores ↗` (new tab, `rel=noopener`) after the
+    popover's round button and in the round sheet's progress line; absent
+    when neither applies or the value is not http(s).
+106. Cache: the parsed board (with `snapshot: {capturedAt}`) is cached at
+    `sc:ee:<key>:scoring` and hydrates a reload that cannot reach the
+    files (`resultsIdx`, `scoresMeta`, footer).
+107. Absent/unreadable: a 404 (not published), a non-JSON body, a file
+    under another token or a bad shape are ignored silently — results
+    stay "Not posted yet", the footer says "results not loaded", nothing
+    is cached, no status-line error, no page error.
+108. Tool: `encryptSnapshot({ kind: "scores" })` requires the schedule's
+    token and writes `{kind, capturedAt, text}` (`--scores` → `ee-<key>-
+    scores.json`, `--decrypt --scores` reads it); a schedule snapshot
+    carries `scoresUrl` (`--scores-url`) and `links` (`--links <json>`,
+    `{}` when absent).
+
+### General schedule (evententries General Schedule tab)
+
+The schedule snapshot may also carry the show center's "General Schedule"
+tab (`--schedule <file>`, plaintext field `schedule`): per division and
+phase, the ring and the time block. It fills phases the order of go has
+no rider rows for yet — show jumping, published after cross-country —
+with the division's block start, which is exactly the shared-block-start
+shape ShowConnect publishes for SJ, so `sjBlockDivs`, the
+reverse-of-standing round order and `autoEstimate` slot estimates apply
+unchanged. Tests use small synthetic pastes (invented names).
+
+109. `parseGeneralSchedule(text, startDate, hints)` grammar (one cell per
+    line or tab-separated): column header tokens (`Date`, `Ring`, `Time`,
+    `Division`, `Classification`, `Judge(s)`) are ignored; a date line
+    (`Thu, 10/29`) sets the day (year from `startDate`, rolling into the
+    next year when the month precedes the start month); a block is a
+    range line (`09:30-10:22`) followed by the division code and the
+    classification (`Dressage` / `Cross Country` / `Stadium` → Show
+    Jumping, via `oogPhase`); blocks before any date line are dropped.
+    Times carry no AM/PM: `gsHour24` reads hours 1–6 as PM, 7–11 as AM,
+    12 as noon (so `11:20-02:04` spans noon); an end before its start is
+    clamped to the start. Every other line is bare text — a judge or a
+    ring: with `hints.judges` (from the order of go) a judge line is
+    skipped and any other bare line sets the ring; without judge hints a
+    line is a ring only if it is in `hints.venues` or starts with `SJ` /
+    `XC`, else ignored. Rings carry across blocks until the next ring
+    line. Empty, null or garbage input yields `[]`, never a throw.
+110. `parseOrderOfGo` also returns `judges` (names from every `Judge(s):`
+    line, role tags like `(C)` stripped, de-duplicated) and `venues` (the
+    ring headings seen). `applyGeneralSchedule(feed, blocks)` appends, to
+    every entry of a block's division, a `RidingDetails` row for each
+    phase the entry has NO row for — `{Phase, Venues: [{venue: ring}],
+    RideTimes: <block start>, BlockEnd: <block end>, Block: true}`, both
+    times in the ShowConnect `RideTimes` format so `parseRideTime` reads
+    them — and returns the count. Existing rows (individually timed
+    phases) are never touched; applying twice adds nothing; no blocks /
+    no feed are no-ops.
+111. End to end (`fetchSnapshot` applies the schedule when the plaintext
+    carries one; an empty `schedule` leaves the feed as the order of go):
+    filled rows render on their day (a Sunday chip appears), the popover
+    time row reads `10:26 AM–10:52 AM (division block) · <ring>`
+    (`extractRides` carries `blockEnd` for `Block` rows; individually
+    timed rows show a plain time), a division whose entries now share
+    one SJ time lands in `sjBlockDivs` (a single-entry division does not —
+    the >1-identical-times rule stands; neither does one with individual
+    SJ rows), and once a scores snapshot gives placings the SJ round
+    sheet runs in reverse of standing with `~` slot estimates and the
+    timeline row shows `est. slot ~H:MM · Nth of M to jump, by standing`.
+112. Tool: `encryptSnapshot({ schedule })` stores the General Schedule
+    text as `schedule` in the schedule plaintext (`""` when absent; a
+    scores snapshot never carries one); `--schedule <file>` on the CLI.

@@ -175,6 +175,7 @@
 
   /* Round view sheet: a division's phase in running order, scores live */
   .pop-round { margin-top: 8px; }
+  .live-link { margin-left: 10px; font-size: 13px; font-weight: 650; color: var(--accent); text-decoration: none; }
   .round-link {
     border: none; background: none; padding: 0; color: var(--accent);
     font-weight: 650; font-size: 13px; cursor: pointer; font-family: inherit;
@@ -422,6 +423,7 @@ let CACHE_EVENT = null;  // sc:<id>:event — feed cache {at, value}
 let CACHE_SCORING = null;// sc:<id>:scoring — scoring cache {at, value}
 // Snapshot events only: the hosted file and the decryption token.
 let SNAPSHOT_URL = null; // snapshots/ee-<key>.json, relative to the page
+let SCORES_SNAPSHOT_URL = null; // snapshots/ee-<key>-scores.json (optional)
 let SNAPSHOT_TOKEN_KEY = null; // sc:ee:<key>:k — token from the ?k= link
 let snapshotToken = null;
 if (eventId !== null) {
@@ -430,6 +432,7 @@ if (eventId !== null) {
   CACHE_SCORING = `sc:${eventId}:scoring`;
   if (isSnapshotEvent(eventId)) {
     SNAPSHOT_URL = `snapshots/ee-${eventId.slice(3)}.json`;
+    SCORES_SNAPSHOT_URL = `snapshots/ee-${eventId.slice(3)}-scores.json`;
     SNAPSHOT_TOKEN_KEY = `sc:${eventId}:k`;
     // The link carries the token once; it's then remembered on the device
     // so a bare ?event=ee:<key> (and the last-event resume) keeps working.
@@ -674,6 +677,7 @@ function extractRides(feed) {
         dayKey: isoDay(override || when), // an override can move a ride's day
         phase: rd.Phase,
         venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
+        blockEnd: rd.Block ? parseRideTime(rd.BlockEnd) : null, // division block window (snapshot events)
         rider: e.RiderName,
         horse: e.HorseName,
         pinny: e.PinnyNumber,
@@ -957,11 +961,13 @@ function popoverHTML(ride, adj, delayMin) {
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(revised; sched ${fmtClock(ride.when)})</span>`
     : delayMin
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(sched ${fmtClock(ride.when)}, +${delayMin} min ${esc(ride.venue)})</span>`
+    : ride.blockEnd
+    ? `${fmtClock(ride.when)}–${fmtClock(ride.blockEnd)} <span class="pending">(division block)</span>`
     : fmtClock(ride.when);
   // Scored phases link through to the division's round view; Phases A/B/C
   // carry no scoring fields, so there is no round to show.
   const roundBtn = mapGet(PHASE_DONE_FIELD, ride.phase)
-    ? `<div class="pop-round"><button class="round-link" data-division="${esc(ride.division)}" data-phase="${esc(ride.phase)}">view ${esc(mapGet(PHASE_SHORT, ride.phase) || ride.phase)} round →</button></div>`
+    ? `<div class="pop-round"><button class="round-link" data-division="${esc(ride.division)}" data-phase="${esc(ride.phase)}">view ${esc(mapGet(PHASE_SHORT, ride.phase) || ride.phase)} round →</button>${liveScoresLinkHTML(ride.division)}</div>`
     : "";
   return `
     <div class="pop">
@@ -1375,7 +1381,7 @@ function renderRoundSheet() {
       progress += ` · through ${fmtClock(new Date(Math.max(...times.map(t => t.getTime()))))}`;
     }
   }
-  document.getElementById("round-sub").textContent = progress;
+  document.getElementById("round-sub").innerHTML = esc(progress) + liveScoresLinkHTML(division);
 
   const rowsHTML = combos.map(c => {
     let resHTML;
@@ -1558,7 +1564,8 @@ function updateFooter() {
   // no live feed behind it, so "Updated" in the status line means "the
   // hosted file was re-read", not "the show office changed something".
   const snapNote = snapshotMeta
-    ? ` Schedule: evententries order of go captured ${snapshotMeta.capturedAt || "manually"} — no live results.`
+    ? ` Schedule: evententries order of go captured ${snapshotMeta.capturedAt || "manually"}; results ${
+        scoresMeta ? `captured ${scoresMeta.capturedAt || "manually"}` : "not loaded"} — nothing here is live.`
     : "";
   document.querySelector("footer").textContent =
     `Times are event-local${short ? ` (${short})` : ""}. Tap a ride for details.${snapNote}`;
@@ -1698,6 +1705,7 @@ function parseOrderOfGo(text, startDate, details) {
   };
   const combos = new Map(); // pinny -> entry
   const stats = { rides: 0, breaks: 0, skipped: 0, sections: 0 };
+  const judges = new Set(), venues = new Set();
   let ring = "", pending = [], pinny = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -1707,6 +1715,11 @@ function parseOrderOfGo(text, startDate, details) {
       const title = pending.length ? pending[pending.length - 1] : "";
       const maybeRing = pending.length > 1 ? pending[pending.length - 2] : "";
       if (maybeRing && !OOG_HEADER_WORDS.has(maybeRing.toLowerCase())) ring = maybeRing;
+      if (ring) venues.add(ring);
+      // "Judge(s): Debbie Adams (M), Peter Gray (C)" → the names, so the
+      // general-schedule parser can tell a judge line from a ring line.
+      for (const j of line.replace(/^judge\(s\):?/i, "").split(","))
+        { const n = j.replace(/\([^)]*\)/g, "").trim(); if (n) judges.add(n); }
       stats.sections++;
       pending = []; pinny = null;
       pending.title = title;
@@ -1747,7 +1760,8 @@ function parseOrderOfGo(text, startDate, details) {
     pinny = null;
   }
   const det = Object.assign({ EventName: "" }, details && typeof details === "object" ? details : {});
-  return { EventDetails: det, EntryList: [...combos.values()], stats };
+  return { EventDetails: det, EntryList: [...combos.values()], stats,
+           judges: [...judges], venues: [...venues] };
 }
 
 // AES-GCM key from the link token: SHA-256(token + salt). The token is a
@@ -1808,7 +1822,16 @@ async function fetchSnapshot() {
       // the venue's state for exactly that.
       EventAddress: typeof snap.state === "string" ? snap.state : "",
     });
-    feed.snapshot = { name: snap.name, startDate: snap.startDate, capturedAt: snap.capturedAt };
+    if (typeof snap.schedule === "string" && snap.schedule.trim()) {
+      applyGeneralSchedule(feed, parseGeneralSchedule(snap.schedule, snap.startDate,
+        { judges: feed.judges, venues: feed.venues }));
+    }
+    delete feed.judges; delete feed.venues;
+    feed.snapshot = {
+      name: snap.name, startDate: snap.startDate, capturedAt: snap.capturedAt,
+      scoresUrl: typeof snap.scoresUrl === "string" ? snap.scoresUrl : "",
+      links: snap.links && typeof snap.links === "object" ? snap.links : {},
+    };
     delete feed.stats;
     applySnapshotFeed(feed, Date.now());
     evictOtherEventCaches();
@@ -1832,6 +1855,281 @@ async function fetchSnapshot() {
     snapshotFetchInFlight = false;
   }
   render();
+}
+
+// ---- General schedule (evententries "General Schedule" tab, pasted) ----
+// Per division and phase, the ring and the time block ("10:26-10:52"),
+// grouped under date lines ("Sun, 11/01") and ring lines. Used to fill
+// phases the order of go has no rider rows for yet — show jumping, whose
+// order is posted after cross country — with the division's block start,
+// exactly the shared-block-start shape ShowConnect publishes for SJ: the
+// page then treats the division as an SJ block (reverse-of-standing
+// order, slot estimates from live placings). Times carry no AM/PM: hours
+// 1–6 are read as PM, 7–12 as AM with 12 as noon (show days start ~7 AM).
+// Ring vs judge lines are both bare text; judge names learned from the
+// order of go decide, else a line is a ring only if it is a known venue
+// or starts with "SJ"/"XC".
+const GS_DATE_RE = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\w*,\s*(\d{1,2})\/(\d{1,2})$/i;
+const GS_RANGE_RE = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/;
+const GS_HEADER_WORDS = new Set(["date", "ring", "time", "division", "classification", "judge(s)", "judges", "judge"]);
+function gsHour24(h) { h = +h; return h >= 7 && h <= 11 ? h : h === 12 ? 12 : h + 12; }
+function parseGeneralSchedule(text, startDate, hints) {
+  const lines = String(text == null ? "" : text).split(/\r?\n/)
+    .flatMap(l => l.split("\t")).map(s => s.trim()).filter(Boolean);
+  const judges = new Set(((hints && hints.judges) || []).map(j => j.toLowerCase()));
+  const venues = new Set(((hints && hints.venues) || []).map(v => v.toLowerCase()));
+  const start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startDate || ""));
+  const year0 = start ? +start[1] : new Date().getFullYear();
+  const mon0 = start ? +start[2] : 1;
+  const blocks = [];
+  let date = null, ring = "";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (GS_HEADER_WORDS.has(line.toLowerCase())) continue;
+    const dm = GS_DATE_RE.exec(line);
+    if (dm) {
+      const mo = +dm[2], d = +dm[3];
+      date = new Date(mo < mon0 ? year0 + 1 : year0, mo - 1, d); // Dec→Jan wrap
+      continue;
+    }
+    const rm = GS_RANGE_RE.exec(line);
+    if (rm) {
+      const division = lines[i + 1] || "", cls = lines[i + 2] || "";
+      i += 2;
+      if (!date || !division || !cls) continue;
+      const mk = (h, m) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), gsHour24(h), +m);
+      let s = mk(rm[1], rm[2]), e = mk(rm[3], rm[4]);
+      if (e < s) e = s;
+      blocks.push({ division, phase: oogPhase(cls), ring, start: s, end: e });
+      continue;
+    }
+    // Bare text: a judge (skip) or a ring.
+    const low = line.toLowerCase();
+    if (judges.has(low)) continue;
+    if (judges.size || venues.has(low) || /^(sj|xc)\b/i.test(line)) ring = line;
+  }
+  return blocks;
+}
+function rideTimeString(d) {
+  const h = d.getHours(), h12 = h % 12 || 12;
+  return `${OOG_WEEKDAY_NAMES[d.getDay()]}, ${OOG_MONTH_NAMES[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${h12}:${String(d.getMinutes()).padStart(2, "0")}:00 ${h < 12 ? "AM" : "PM"}`;
+}
+// Fill each entry's missing phases from the division's schedule blocks.
+// Existing rows (individually timed phases) are never touched. Added rows
+// carry BlockEnd so the popover can show the whole window.
+function applyGeneralSchedule(feed, blocks) {
+  const byDiv = Object.create(null);
+  for (const b of blocks || []) (byDiv[b.division] = byDiv[b.division] || []).push(b);
+  let added = 0;
+  for (const e of (feed && Array.isArray(feed.EntryList)) ? feed.EntryList : []) {
+    for (const b of byDiv[e.Division] || []) {
+      if (!Array.isArray(e.RidingDetails)) e.RidingDetails = [];
+      if (e.RidingDetails.some(rd => rd && rd.Phase === b.phase)) continue;
+      e.RidingDetails.push({ Phase: b.phase, Venues: [{ venue: b.ring || null }],
+        RideTimes: rideTimeString(b.start), BlockEnd: rideTimeString(b.end), Block: true });
+      added++;
+    }
+  }
+  return added;
+}
+
+// ---- Scores snapshot (evententries "Live Scores" board, pasted) ----
+// Optional second file, snapshots/ee-<key>-scores.json, same token. The
+// board copies as: a division header ("Novice Rider (NR)<event name>"),
+// a judge line, the column names one per line, then per combo a pinny,
+// the rider ("First Last (USA)"), the horse, and ONLY the cells that have
+// posted — empty cells are dropped from the copy, so columns are assigned
+// left to right from the division's header (0–3 "Jdg @ X" judge columns,
+// then Dress Score, To Date Place, XC Jump, XC Elapsed, XC Time, To Date
+// Score, To Date Place, Stad Jump, Time Pen, Final Score, Final Place).
+// The XC Elapsed cell ("6:12") anchors the XC block when a leading XC
+// cell is blank. Out-of-competition codes (E, R, W, RF, …) can sit in any
+// cell and become FinalPlace, which is what the rest of the page keys on.
+// Output mirrors scoringLive: DivisionsList[{DivisionId, DivisionName,
+// PhaseOrder}] + ScoringList[{Pinny, DivisionId, DressageScore, …}], with
+// DivisionName = the board's division code, which is what the order-of-go
+// feed uses as Division — so buildResultsIndex joins them unchanged.
+const SB_NUM_RE = /^-?\d+(\.\d+)?$/;
+const SB_TIME_RE = /^\d+:\d{2}(\.\d+)?$/;
+const SB_CODE_RE = /^[A-Z]{1,3}$/; // E, R, W, RF, TE, MR, IE, IW, DNS…
+const SB_CELL_RE = /^(-?\d+(\.\d+)?|\d+:\d{2}(\.\d+)?|[A-Z]{1,3})$/;
+const SB_NAMEISH = s => /[A-Za-z]/.test(s) && !SB_CELL_RE.test(s);
+// The judge line under a division header carries names ("Jdg @ M: Debbie
+// Adams, …" / "Judge: Wendy Wergeles"); the column tokens ("Jdg @ M") do
+// not, which is what keeps them from reading as headers.
+const SB_JUDGE_LINE = /^(Jdg @ [A-Z]:|Judge:)/i;
+
+// Phase order per division from the order-of-go feed (phases sorted by
+// their earliest ride time), e.g. "d-xc-sj"; unknown divisions default.
+function phaseOrderFromFeed(feed) {
+  const abbr = { "Dressage": "d", "Cross Country": "xc", "Show Jumping": "sj" };
+  const first = Object.create(null); // division -> phase -> earliest ms
+  for (const e of (feed && Array.isArray(feed.EntryList)) ? feed.EntryList : []) {
+    if (!e || !e.Division) continue;
+    for (const rd of Array.isArray(e.RidingDetails) ? e.RidingDetails : []) {
+      const when = rd && parseRideTime(rd.RideTimes);
+      if (!when || !abbr[rd.Phase]) continue;
+      const d = first[e.Division] || (first[e.Division] = Object.create(null));
+      if (!(rd.Phase in d) || when.getTime() < d[rd.Phase]) d[rd.Phase] = when.getTime();
+    }
+  }
+  const out = Object.create(null);
+  for (const div in first) {
+    const seen = Object.entries(first[div]).sort((a, b) => a[1] - b[1]).map(([p]) => abbr[p]);
+    // Phases not yet in the order of go (SJ posts after XC) still run:
+    // append them in the usual order so a division is never "complete"
+    // before its last phase has even been scheduled.
+    for (const p of ["d", "xc", "sj"]) if (!seen.includes(p)) seen.push(p);
+    out[div] = seen.join("-");
+  }
+  return out;
+}
+
+function parseScoreboard(text, feed) {
+  const lines = String(text == null ? "" : text).split(/\r?\n/)
+    .flatMap(l => l.split("\t")).map(s => s.trim()).filter(Boolean);
+  const orders = phaseOrderFromFeed(feed);
+  const divisions = new Map(); // code -> { DivisionId, DivisionName, PhaseOrder }
+  const scoring = [];
+  const stats = { rows: 0, divisions: 0, skipped: 0, skippedSamples: [] };
+  const skip = line => { stats.skipped++; if (stats.skippedSamples.length < 10) stats.skippedSamples.push(line); };
+  let code = null, judges = 0, headerDone = false;
+  const isHeader = i => SB_NAMEISH(lines[i]) && SB_JUDGE_LINE.test(lines[i + 1] || "");
+  // Pinny -> division from the order-of-go feed. With a feed, a row starts
+  // only at an integer that is a known pinny IN THIS BOARD'S DIVISION —
+  // which rules out place cells, page chrome and ad copy that happen to
+  // follow a number, and lets a horse named "PJ" through. Without a feed
+  // (synthetic input) the shape heuristic alone decides.
+  const feedDiv = Object.create(null);
+  let haveFeed = false;
+  for (const e of (feed && Array.isArray(feed.EntryList)) ? feed.EntryList : []) {
+    if (e && e.PinnyNumber != null) { feedDiv[e.PinnyNumber] = e.Division; haveFeed = true; }
+  }
+  const rowStart = i => {
+    if (!/^\d{1,4}$/.test(lines[i] || "")) return false;
+    const n1 = lines[i + 1] || "", n2 = lines[i + 2] || "";
+    if (!/[A-Za-z]/.test(n1) || SB_CELL_RE.test(n1) || isHeader(i + 1) || !n2) return false;
+    if (haveFeed) return feedDiv[parseInt(lines[i], 10)] === code;
+    return SB_NAMEISH(n2);
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isHeader(i)) {
+      // Division code: the first "(…)" that runs straight into the event
+      // name ("Open Preliminary (OP)The Eventing…"); else the last one.
+      const groups = [...line.matchAll(/\(([^()]+)\)(?=(\S|$))/g)];
+      const pick = groups.find(g => g[2]) || groups[groups.length - 1];
+      code = pick ? pick[1].trim() : line.trim();
+      if (!divisions.has(code)) {
+        divisions.set(code, { DivisionId: code, DivisionName: code, PhaseOrder: orders[code] || "d-xc-sj" });
+        stats.divisions++;
+      }
+      judges = 0; headerDone = false;
+      i += 1; // the judge line
+      continue;
+    }
+    if (code === null) continue; // page chrome before the first board
+    if (!headerDone) {
+      if (/^Jdg @ [A-Z]$/i.test(line)) judges++;
+      // The first row ends the column-name block.
+      if (!rowStart(i)) continue;
+      headerDone = true;
+    }
+    if (!rowStart(i)) { skip(line); continue; }
+    const pinny = parseInt(line, 10), rider = lines[i + 1], horse = lines[i + 2];
+    const cells = [];
+    let j = i + 3;
+    for (; j < lines.length && SB_CELL_RE.test(lines[j]); j++) {
+      if (rowStart(j)) break; // the next row's pinny is an integer too
+      cells.push(lines[j]);
+    }
+    i = j - 1;
+    if (/^test ride$/i.test(rider)) { skip(rider); continue; }
+    scoring.push(Object.assign({ Pinny: pinny, DivisionId: code, RiderName: rider, HorseName: horse },
+      scoreboardCells(cells, judges)));
+    stats.rows++;
+  }
+  return { DivisionsList: [...divisions.values()], ScoringList: scoring, stats };
+}
+
+// Assign a row's posted cells to the scoringLive fields. Cells arrive in
+// column order with blanks dropped; the dressage block is always the
+// first J+2 cells, the XC block is found from its Elapsed cell, and the
+// stadium block is whatever follows it. Any out code ends the row's
+// standing: it becomes FinalPlace (and the place of the phase it sits in).
+function scoreboardCells(cells, judges) {
+  const r = { DressageScore: "--", DressagePlace: "--", XCScore: "--", XCPlace: "--",
+              SJScore: "--", SJPlace: "--", FinalPoints: "--", FinalPlace: "--" };
+  const codeAt = cells.findIndex(c => SB_CODE_RE.test(c));
+  const vals = codeAt === -1 ? cells : cells.slice(0, codeAt);
+  const code = codeAt === -1 ? null : cells[codeAt];
+  const J = judges;
+  if (vals.length > J) r.DressageScore = vals[J];
+  if (vals.length > J + 1) r.DressagePlace = vals[J + 1];
+  const ei = vals.findIndex(c => SB_TIME_RE.test(c));
+  let xcEnd = -1;
+  if (ei !== -1) {
+    // [XC Jump] Elapsed, XC Time, To Date Score, To Date Place
+    if (vals.length > ei + 2) r.XCScore = vals[ei + 2];
+    if (vals.length > ei + 3) r.XCPlace = vals[ei + 3];
+    xcEnd = ei + 3;
+  } else if (vals.length >= J + 7) {
+    // No elapsed cell but a full XC block: positional.
+    r.XCScore = vals[J + 5]; r.XCPlace = vals[J + 6]; xcEnd = J + 6;
+  }
+  if (xcEnd !== -1) {
+    const rest = vals.slice(xcEnd + 1); // Stad Jump, Time Pen, Final Score, Final Place
+    if (rest.length >= 2) { r.SJScore = rest[rest.length - 2]; r.SJPlace = rest[rest.length - 1]; }
+  }
+  r.FinalPoints = r.SJScore !== "--" ? r.SJScore : r.XCScore !== "--" ? r.XCScore : r.DressageScore;
+  r.FinalPlace = r.SJPlace !== "--" ? r.SJPlace : r.XCPlace !== "--" ? r.XCPlace : r.DressagePlace;
+  if (code) {
+    r.FinalPlace = code;
+    // The phase the code sits in: after the XC block → SJ; after dressage → XC.
+    if (xcEnd !== -1 && codeAt > xcEnd) r.SJPlace = code;
+    else if (vals.length >= J + 2) r.XCPlace = code;
+    else r.DressagePlace = code;
+  }
+  return r;
+}
+
+let scoresMeta = null; // { capturedAt } of the loaded scores snapshot
+let scoresFetchInFlight = false;
+async function fetchScoresSnapshot() {
+  if (!SCORES_SNAPSHOT_URL || !snapshotToken || scoresFetchInFlight) return;
+  scoresFetchInFlight = true;
+  try {
+    const resp = await fetch(SCORES_SNAPSHOT_URL, { cache: "no-store", signal: fetchTimeoutSignal() });
+    if (!resp.ok) return; // no scores published (yet) — a nicety, like scoringLive
+    const payload = await resp.json();
+    if (!(typeof crypto !== "undefined" && crypto.subtle)) return;
+    const snap = await decryptSnapshot(payload, snapshotToken);
+    if (!snap || typeof snap.text !== "string") return;
+    const scoring = parseScoreboard(snap.text, lastFeed);
+    delete scoring.stats;
+    scoring.snapshot = { capturedAt: snap.capturedAt };
+    resultsIdx = buildResultsIndex(scoring);
+    scoresMeta = scoring.snapshot;
+    cachePut(CACHE_SCORING, scoring);
+    updateFooter();
+    render();
+  } catch (e) { /* results are a nicety; ignore failures */ }
+  finally { scoresFetchInFlight = false; }
+}
+
+// Snapshot events can carry the source site's own live-scores pages: a
+// per-division link (snapshot `links[code]`) or the show-wide board
+// (`scoresUrl`). A plain outbound link — the official page is the live
+// source; this page never fetches it. Only http(s) URLs are honored.
+function liveScoresUrl(division) {
+  const m = snapshotMeta || {};
+  const links = m.links && typeof m.links === "object" ? m.links : {};
+  const u = (Object.hasOwn(links, division) && links[division]) || m.scoresUrl || "";
+  return typeof u === "string" && /^https?:\/\//i.test(u) ? u : "";
+}
+function liveScoresLinkHTML(division) {
+  const u = liveScoresUrl(division);
+  return u ? ` <a class="live-link" href="${esc(u)}" target="_blank" rel="noopener">live scores ↗</a>` : "";
 }
 
 // Shared by the fetch path and cache hydration: adopt a parsed snapshot
@@ -2326,7 +2624,13 @@ if (eventId !== null) {
       }
     }
     const sc = cacheGet(CACHE_SCORING);
-    if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
+    if (sc && sc.value) {
+      resultsIdx = buildResultsIndex(sc.value);
+      if (isSnapshotEvent(eventId) && sc.value.snapshot && typeof sc.value.snapshot === "object") {
+        scoresMeta = sc.value.snapshot;
+        updateFooter();
+      }
+    }
     // Any cached feed renders immediately (rows, or the pre-schedule
     // roster when the cache predates the published schedule) — the page
     // must be useful offline before any fetch settles.
@@ -2342,8 +2646,9 @@ if (eventId !== null) {
   if (isSnapshotEvent(eventId)) {
     // No live feeds: re-read the hosted file on the slow cadence (a
     // re-published order of go lands by commit, like config edits).
-    fetchSnapshot();
+    fetchSnapshot().then(fetchScoresSnapshot); // scores need the feed for phase order
     setInterval(fetchSnapshot, SNAPSHOT_POLL_MS);
+    setInterval(fetchScoresSnapshot, SNAPSHOT_POLL_MS);
   } else {
     fetchEventFeed();
     fetchScoring();
