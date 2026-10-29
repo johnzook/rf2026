@@ -881,6 +881,22 @@ function tiedAt(divisionName, field, place) {
   }
   return n > 1;
 }
+// Size of the field a place is measured against: accepted combos in the
+// division (from the entry list) minus those the scoring feed marks out
+// (E/R/W…), so "5th of 15" answers "of how many still in it". Falls back
+// to the scoring rows when the entry list doesn't know the division; 0
+// when neither does (callers then omit the "of N").
+function divisionField(divisionName) {
+  const rows = scoringByDiv[divisionName] || [];
+  let outs = 0;
+  for (const s of rows) if (mapGet(OUT_WORDS, String(s.FinalPlace || "").trim())) outs++;
+  const entries = (lastFeed && Array.isArray(lastFeed.EntryList)) ? lastFeed.EntryList : [];
+  let n = 0;
+  for (const e of entries) if (e && e.Status === "Accepted" && e.Division === divisionName) n++;
+  // The entry list normally lists every combo; scoring rows can't exceed
+  // it except in degenerate data, where the larger count is the safer one.
+  return Math.max(0, Math.max(n, rows.length) - outs);
+}
 function donePlaces(ride, isFinal) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   if (!res) return { phase: null, overall: null };
@@ -889,9 +905,16 @@ function donePlaces(ride, isFinal) {
   const op = parseInt(res.FinalPlace, 10);
   const ppT = pp && tiedAt(ride.division, pf, pp) ? "T" : "";
   const opT = op && tiedAt(ride.division, "FinalPlace", op) ? "T" : "";
+  // "of N" rides on the first place shown, so the line reads
+  // "Dressage 5th of 15 · currently 5th overall" rather than saying it twice.
+  // A combo that is itself out (E/R/W…) keeps its historical place bare:
+  // "14th of 6" after the field shrank would read as nonsense.
+  const selfOut = mapGet(OUT_WORDS, String(res.FinalPlace || "").trim());
+  const n = (pp || op) && !selfOut ? divisionField(ride.division) : 0;
+  const of = n ? ` of ${n}` : "";
   return {
-    phase: pp ? `${mapGet(PHASE_SHORT, ride.phase) || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
-    overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)} overall` : null,
+    phase: pp ? `${mapGet(PHASE_SHORT, ride.phase) || ride.phase} ${ppT}${pp}${ordinal(pp)}${of}` : null,
+    overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)}${pp ? "" : of} overall` : null,
   };
 }
 
@@ -929,11 +952,11 @@ function adjustedTime(ride) {
 }
 
 // Result cell: "--" / "" from the feed means not yet posted.
-function resCell(score, place, tied) {
+function resCell(score, place, tied, of) {
   const has = v => v != null && v !== "" && v !== "--";
   if (!has(score) && !has(place)) return `<span class="pending">—</span>`;
   let out = has(score) ? esc(score) : "";
-  if (has(place)) out += ` <span class="place">(${tied ? "T" : ""}${esc(place)}${ordinal(place)})</span>`;
+  if (has(place)) out += ` <span class="place">(${tied ? "T" : ""}${esc(place)}${ordinal(place)}${of ? ` of ${of}` : ""})</span>`;
   return out;
 }
 function ordinal(p) {
@@ -947,8 +970,11 @@ function popoverHTML(ride, adj, delayMin) {
   const res = resultsIdx[`${ride.pinny}|${ride.division}`];
   let resultsRows;
   if (res) {
+    // Places need a denominator ("5th of 5, or of 15?"): the field size is
+    // stated once in the Results header rather than on every row.
+    const field = divisionField(ride.division);
     resultsRows = `
-      <tr><td class="results-head" colspan="2">Results</td></tr>
+      <tr><td class="results-head" colspan="2">Results${field ? ` <span class="pending">· ${field} in ${esc(ride.division)}</span>` : ""}</td></tr>
       <tr><td>Dressage</td><td>${resCell(res.DressageScore, res.DressagePlace, tiedAt(ride.division, "DressagePlace", parseInt(res.DressagePlace, 10)))}</td></tr>
       <tr><td>Cross Country</td><td>${resCell(res.XCScore, res.XCPlace, tiedAt(ride.division, "XCPlace", parseInt(res.XCPlace, 10)))}</td></tr>
       <tr><td>Show Jumping</td><td>${resCell(res.SJScore, res.SJPlace, tiedAt(ride.division, "SJPlace", parseInt(res.SJPlace, 10)))}</td></tr>
