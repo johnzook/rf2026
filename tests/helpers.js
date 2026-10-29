@@ -32,9 +32,22 @@ const DEFAULT_NOW = denverMs(2026, 7, 18, 12, 0, 0);
 
 // ---- Local server for the page itself (mutable bytes for deploy tests) ----
 
+// Besides the page, the server can hold per-test files (setFile) — used
+// for the hosted `snapshots/ee-<key>.json` of snapshot events, so tests
+// never read the committed snapshot. Anything under /snapshots/ that was
+// not registered 404s (the page's "not published" path); every other path
+// still serves the page bytes.
 function startServer() {
   let pageBytes = INDEX_HTML;
+  const files = new Map();
   const server = http.createServer((req, res) => {
+    const pathname = new URL(req.url, 'http://x').pathname;
+    const f = files.get(pathname);
+    if (f) {
+      res.writeHead(200, { 'content-type': f.contentType, 'cache-control': 'no-store' });
+      return res.end(f.body);
+    }
+    if (pathname.startsWith('/snapshots/')) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(pageBytes);
   });
@@ -43,7 +56,9 @@ function startServer() {
       resolve({
         url: `http://127.0.0.1:${server.address().port}/`,
         setPage: bytes => { pageBytes = bytes; },
-        reset: () => { pageBytes = INDEX_HTML; },
+        setFile: (path, body, contentType = 'application/json') => { files.set(path, { body, contentType }); },
+        clearFiles: () => { files.clear(); },
+        reset: () => { pageBytes = INDEX_HTML; files.clear(); },
         close: () => new Promise(r => server.close(r)),
       });
     });
@@ -145,6 +160,7 @@ async function stubRoutes(context, { feed, scoring, calendar, eventId, network, 
 //   server         : a startServer() handle (required)
 //   url            : override target URL (e.g. file://; default ?event=<id>)
 //   waitLoaded     : wait for the initial event fetch + network idle (default true)
+//   requestLog     : array that receives every request URL the page makes
 async function openPage(opts) {
   const {
     feed = { EntryList: [] },
@@ -160,6 +176,7 @@ async function openPage(opts) {
     url = server && `${server.url}?event=${eventId}`,
     viewport = { width: 420, height: 800 },
     waitLoaded = network === 'ok',
+    requestLog = null,
   } = opts;
 
   const browser = await getBrowser();
@@ -173,6 +190,7 @@ async function openPage(opts) {
 
   const page = await context.newPage();
   page.on('pageerror', e => { page.__pageError = e; });
+  if (requestLog) page.on('request', r => { requestLog.push(r.url()); });
   await page.goto(url);
   if (waitLoaded) {
     // lastUpdatedMs is set synchronously with rides+render, so once visible

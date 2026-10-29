@@ -371,6 +371,7 @@ const CALENDAR_URL = API_BASE; // no id → full event calendar (~11 KB)
 const EVENT_POLL_MS = 20_000;
 const SCORING_POLL_MS = 60_000;
 const DEPLOY_POLL_MS = 60_000;
+const SNAPSHOT_POLL_MS = 60_000; // hosted order-of-go re-read (changes only by commit)
 const CALENDAR_TTL_MS = 6 * 60 * 60_000; // revalidate the calendar cache after 6 h
 const SOON_WINDOW_MIN = 30; // highlight rides within the next N minutes
 const PAST_GRACE_MIN = 10;  // keep a row active this long past its (estimated) time
@@ -387,19 +388,29 @@ const RELOAD_STATE_KEY = "sc:reloadState";    // sessionStorage deploy-reload ha
 // ?choose → picker. ?event=<id> → that event. Bare URL → sc:last-event if
 // present, else picker. Invalid ?event → picker.
 
+// Two kinds of event id: a numeric ShowConnectId (live feeds), or
+// "ee:<key>" — a hosted snapshot of an evententries.com show-center Order of
+// Go (no live feed; see "Snapshot events" below). The id regex below is
+// shared by the URL, sc:last-event and the per-event storage keys.
+const EVENT_ID_RE = /^(\d{1,9}|ee:[A-Za-z0-9_-]{1,40})$/;
+// Bounded to 9 digits: longer digit strings survive parseInt only as
+// exponent notation ("1e+30"), which breaks key round-tripping.
+function parseEventId(s) {
+  const t = String(s == null ? "" : s).trim();
+  if (!EVENT_ID_RE.test(t)) return null;
+  return t.startsWith("ee:") ? t : parseInt(t, 10);
+}
+const isSnapshotEvent = id => typeof id === "string" && id.startsWith("ee:");
+
 const urlParams = new URLSearchParams(location.search);
 let eventId = null;
 if (!urlParams.has("choose")) {
-  // Bounded to 9 digits: longer digit strings survive parseInt only as
-  // exponent notation ("1e+30"), which breaks key round-tripping.
   const rawEvent = urlParams.get("event");
   if (rawEvent !== null) {
-    if (/^\d{1,9}$/.test(rawEvent.trim())) eventId = parseInt(rawEvent.trim(), 10);
+    eventId = parseEventId(rawEvent);
   } else {
-    try {
-      const last = localStorage.getItem(LAST_EVENT_KEY);
-      if (last && /^\d{1,9}$/.test(last)) eventId = parseInt(last, 10);
-    } catch (e) { /* blocked storage — fall through to the picker */ }
+    try { eventId = parseEventId(localStorage.getItem(LAST_EVENT_KEY)); }
+    catch (e) { /* blocked storage — fall through to the picker */ }
   }
 }
 
@@ -409,12 +420,34 @@ let SCORING_URL = null;
 let RIDERS_KEY = null;   // sc:<id>:riders — followed rider names (JSON string[])
 let CACHE_EVENT = null;  // sc:<id>:event — feed cache {at, value}
 let CACHE_SCORING = null;// sc:<id>:scoring — scoring cache {at, value}
+// Snapshot events only: the hosted file and the decryption token.
+let SNAPSHOT_URL = null; // snapshots/ee-<key>.json, relative to the page
+let SNAPSHOT_TOKEN_KEY = null; // sc:ee:<key>:k — token from the ?k= link
+let snapshotToken = null;
 if (eventId !== null) {
-  EVENT_URL = `${API_BASE}/${eventId}`;
-  SCORING_URL = `${EVENT_URL}/scoringLive`;
   RIDERS_KEY = `sc:${eventId}:riders`;
   CACHE_EVENT = `sc:${eventId}:event`;
   CACHE_SCORING = `sc:${eventId}:scoring`;
+  if (isSnapshotEvent(eventId)) {
+    SNAPSHOT_URL = `snapshots/ee-${eventId.slice(3)}.json`;
+    SNAPSHOT_TOKEN_KEY = `sc:${eventId}:k`;
+    // The link carries the token once; it's then remembered on the device
+    // so a bare ?event=ee:<key> (and the last-event resume) keeps working.
+    const fromUrl = (urlParams.get("k") || "").trim();
+    try {
+      if (/^[A-Za-z0-9_-]{8,64}$/.test(fromUrl)) {
+        snapshotToken = fromUrl;
+        if (localStorage.getItem(SNAPSHOT_TOKEN_KEY) !== fromUrl)
+          localStorage.setItem(SNAPSHOT_TOKEN_KEY, fromUrl);
+      } else {
+        const stored = localStorage.getItem(SNAPSHOT_TOKEN_KEY);
+        if (stored && /^[A-Za-z0-9_-]{8,64}$/.test(stored)) snapshotToken = stored;
+      }
+    } catch (e) { if (/^[A-Za-z0-9_-]{8,64}$/.test(fromUrl)) snapshotToken = fromUrl; }
+  } else {
+    EVENT_URL = `${API_BASE}/${eventId}`;
+    SCORING_URL = `${EVENT_URL}/scoringLive`;
+  }
 }
 
 // ---- Maintainer config resolution ----
@@ -571,7 +604,7 @@ function pastFollowedNames() {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k === RIDERS_KEY || !/^sc:\d+:riders$/.test(k)) continue;
+      if (k === RIDERS_KEY || !/^sc:(\d+|ee:[A-Za-z0-9_-]+):riders$/.test(k)) continue;
       for (const n of getStoredList(k)) if (typeof n === "string") names.add(n);
     }
   } catch (e) { /* blocked storage — no history */ }
@@ -720,7 +753,7 @@ function evictOtherEventCaches() {
     const doomed = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (/^sc:\d+:(event|scoring)$/.test(k) && k !== CACHE_EVENT && k !== CACHE_SCORING)
+      if (/^sc:(\d+|ee:[A-Za-z0-9_-]+):(event|scoring)$/.test(k) && k !== CACHE_EVENT && k !== CACHE_SCORING)
         doomed.push(k);
     }
     for (const k of doomed) localStorage.removeItem(k);
@@ -1521,8 +1554,14 @@ function setEventName(name) {
 
 function updateFooter() {
   const short = tzShortName(eventTz);
+  // A snapshot event says where its schedule came from and when: there is
+  // no live feed behind it, so "Updated" in the status line means "the
+  // hosted file was re-read", not "the show office changed something".
+  const snapNote = snapshotMeta
+    ? ` Schedule: evententries order of go captured ${snapshotMeta.capturedAt || "manually"} — no live results.`
+    : "";
   document.querySelector("footer").textContent =
-    `Times are event-local${short ? ` (${short})` : ""}. Tap a ride for details.`;
+    `Times are event-local${short ? ` (${short})` : ""}. Tap a ride for details.${snapNote}`;
 }
 
 // The calendar cache entry for this event, if any — used for the header
@@ -1600,6 +1639,210 @@ async function fetchEventFeed() {
     eventFetchInFlight = false;
   }
   render();
+}
+
+// ---- Snapshot events (hosted evententries order of go) ----
+// evententries.com show centers have no public API and no CORS, so a
+// maintainer pastes the show center's "Order of Go" text once and commits
+// it as snapshots/ee-<key>.json, AES-GCM encrypted under a random token
+// (tools/snapshot-encrypt.js). The token travels only in the share link
+// (?event=ee:<key>&k=<token>) and is remembered per device; the repo holds
+// ciphertext only, so the schedule is reachable by the people it was sent
+// to without being republished to the world. The decrypted text is parsed
+// into the same EntryList shape the ShowConnect path consumes, so every
+// feature downstream of extractRides works unchanged; there is no scoring
+// feed, so results stay empty.
+
+let snapshotMeta = null; // { name, startDate, capturedAt } of the loaded snapshot
+
+const OOG_WEEKDAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const OOG_WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const OOG_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const OOG_TIME_RE = /^(\d{1,2}):(\d{2})\s*(AM|PM)\s+(Sun|Mon|Tue|Wed|Thu|Fri|Sat)$/i;
+const OOG_HEADER_WORDS = new Set(["pinney", "pinny", "gotime", "rider", "horse", "division"]);
+
+// Phase from an order-of-go section title ("Cross Country Novice",
+// "Show Jumping FEI", "2026 USEF Preliminary Dressage Test B", "2026 USEA
+// Novice Classic Three-Day Test"): anything that isn't XC or SJ is a
+// dressage test.
+function oogPhase(title) {
+  const t = String(title || "").toLowerCase();
+  if (/\bcross[\s-]*country\b|^xc\b/.test(t)) return "Cross Country";
+  if (/\bshow[\s-]*jumping\b|\bstadium\b|^sj\b/.test(t)) return "Show Jumping";
+  return "Dressage";
+}
+
+// Parse the text of an evententries show-center "Order of Go" page (the
+// table copied one cell per line, or tab-separated rows) into a
+// ShowConnect-shaped feed. Grammar, as the page renders it:
+//   <ring>            optional — repeats only when the ring changes
+//   <section title>   the test / phase ("2026 USEA Novice Dressage Test B")
+//   Judge(s): …       marks the end of a section header (may be empty)
+//   <pinny> <HH:MM AM Thu> <rider> <horse> <division>   one entry
+//   <HH:MM AM Thu> Break                                 ignored
+//   <HH:MM AM Thu> Test Ride <horse> <division>          no pinny → ignored
+// Weekday names resolve to dates from `startDate` (ISO, the first day the
+// show can run): each weekday maps to its first occurrence on/after it.
+// Times become RideTimes strings in the exact ShowConnect format so
+// parseRideTime() serves both sources. Returns { EventDetails, EntryList,
+// stats }; a text with no entries yields an empty EntryList (not a throw).
+function parseOrderOfGo(text, startDate, details) {
+  const lines = String(text == null ? "" : text).split(/\r?\n/)
+    .flatMap(l => l.split("\t")).map(s => s.trim()).filter(Boolean);
+  const start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startDate || ""));
+  const base = start ? new Date(+start[1], +start[2] - 1, +start[3]) : null;
+  const dateFor = wd => {
+    if (!base) return null;
+    const off = (OOG_WEEKDAYS[wd] - base.getDay() + 7) % 7;
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate() + off);
+  };
+  const combos = new Map(); // pinny -> entry
+  const stats = { rides: 0, breaks: 0, skipped: 0, sections: 0 };
+  let ring = "", pending = [], pinny = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^judge\(s\)/i.test(line)) {
+      // Section header complete: the title is the last unconsumed line; a
+      // line before it (that isn't a column header) names the ring.
+      const title = pending.length ? pending[pending.length - 1] : "";
+      const maybeRing = pending.length > 1 ? pending[pending.length - 2] : "";
+      if (maybeRing && !OOG_HEADER_WORDS.has(maybeRing.toLowerCase())) ring = maybeRing;
+      stats.sections++;
+      pending = []; pinny = null;
+      pending.title = title;
+      continue;
+    }
+    if (/^\d{1,4}$/.test(line)) { pinny = parseInt(line, 10); continue; }
+    const tm = OOG_TIME_RE.exec(line);
+    if (!tm) {
+      if (!OOG_HEADER_WORDS.has(line.toLowerCase())) pending.push(line);
+      continue;
+    }
+    // A time starts a row; what follows decides which kind.
+    const next = lines[i + 1] || "";
+    if (/^break$/i.test(next)) { stats.breaks++; i += 1; pinny = null; continue; }
+    const rider = next, horse = lines[i + 2] || "", division = lines[i + 3] || "";
+    i += 3;
+    const when = dateFor(tm[4].charAt(0).toUpperCase() + tm[4].slice(1, 3).toLowerCase());
+    if (pinny === null || !rider || !horse || !division || !when) { stats.skipped++; pinny = null; continue; }
+    let h = +tm[1] % 12;
+    if (tm[3].toUpperCase() === "PM") h += 12;
+    const h12 = h % 12 || 12;
+    const rideTime = `${OOG_WEEKDAY_NAMES[when.getDay()]}, ${OOG_MONTH_NAMES[when.getMonth()]} ${when.getDate()}, ${when.getFullYear()}, ${h12}:${tm[2]}:00 ${h < 12 ? "AM" : "PM"}`;
+    const phase = oogPhase(pending.title || "");
+    if (!combos.has(pinny)) {
+      combos.set(pinny, {
+        EntryListId: pinny, PinnyNumber: pinny, RiderName: rider, HorseName: horse,
+        Division: division, DivisionShortName: division, Status: "Accepted",
+        RidingDetails: [],
+      });
+    }
+    const e = combos.get(pinny);
+    // The same combo+phase listed twice (a re-published section) keeps the
+    // later row — the page shows the most recent order.
+    const existing = e.RidingDetails.find(rd => rd.Phase === phase);
+    const rd = { Phase: phase, Venues: [{ venue: ring || null }], RideTimes: rideTime };
+    if (existing) Object.assign(existing, rd); else e.RidingDetails.push(rd);
+    stats.rides++;
+    pinny = null;
+  }
+  const det = Object.assign({ EventName: "" }, details && typeof details === "object" ? details : {});
+  return { EventDetails: det, EntryList: [...combos.values()], stats };
+}
+
+// AES-GCM key from the link token: SHA-256(token + salt). The token is a
+// random ≥8-char string, so there is nothing for a slow KDF to protect
+// against beyond what the token's own entropy already provides.
+async function snapshotKey(token, saltB64) {
+  const bytes = new TextEncoder().encode(token + ":" + saltB64);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["decrypt"]);
+}
+function b64ToBytes(s) {
+  const bin = atob(String(s || ""));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+// Decrypt a snapshots/ee-<key>.json payload {v, salt, iv, data} with the
+// token; resolves to the plaintext object {name, startDate, state,
+// capturedAt, text}. Rejects on a wrong token (GCM auth failure).
+async function decryptSnapshot(payload, token) {
+  if (!payload || payload.v !== 1 || !token) throw new Error("bad snapshot");
+  const key = await snapshotKey(token, payload.salt);
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: b64ToBytes(payload.iv) }, key, b64ToBytes(payload.data));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+// Snapshot counterpart of fetchEventFeed: read the hosted file, decrypt,
+// parse, then the same tail (cache, last-event, render). Errors are
+// explained in the status line — a missing token is the common one.
+let snapshotFetchInFlight = false;
+async function fetchSnapshot() {
+  if (!SNAPSHOT_URL || snapshotFetchInFlight) return;
+  snapshotFetchInFlight = true;
+  const errEl = document.getElementById("fetch-err");
+  try {
+    if (!snapshotToken) {
+      const err = new Error("no token"); err.noToken = true; throw err;
+    }
+    const resp = await fetch(SNAPSHOT_URL, { cache: "no-store", signal: fetchTimeoutSignal() });
+    if (!resp.ok) {
+      const err = new Error(`HTTP ${resp.status}`); err.badEvent = resp.status === 404; throw err;
+    }
+    let payload;
+    try { payload = await resp.json(); } catch (e) { const err = new Error("not json"); err.badEvent = true; throw err; }
+    if (!(typeof crypto !== "undefined" && crypto.subtle)) {
+      const err = new Error("no webcrypto"); err.insecure = true; throw err;
+    }
+    let snap;
+    try { snap = await decryptSnapshot(payload, snapshotToken); }
+    catch (e) { const err = new Error("bad key"); err.badKey = true; throw err; }
+    if (!snap || typeof snap !== "object" || typeof snap.text !== "string") {
+      const err = new Error("bad snapshot"); err.badEvent = true; throw err;
+    }
+    const feed = parseOrderOfGo(snap.text, snap.startDate, {
+      EventName: snap.name,
+      // deriveTz reads a state name off the address; the snapshot carries
+      // the venue's state for exactly that.
+      EventAddress: typeof snap.state === "string" ? snap.state : "",
+    });
+    feed.snapshot = { name: snap.name, startDate: snap.startDate, capturedAt: snap.capturedAt };
+    delete feed.stats;
+    applySnapshotFeed(feed, Date.now());
+    evictOtherEventCaches();
+    cachePut(CACHE_EVENT, feed);
+    try {
+      if (localStorage.getItem(LAST_EVENT_KEY) !== String(eventId))
+        localStorage.setItem(LAST_EVENT_KEY, String(eventId));
+    } catch (e2) {}
+    errEl.textContent = "";
+  } catch (e) {
+    errEl.textContent = e && e.noToken
+      ? "· this schedule needs the key from the link you were sent"
+      : e && e.badKey
+      ? "· the key in this link doesn't open this schedule"
+      : e && e.insecure
+      ? "· open this page over https to read the schedule"
+      : e && e.badEvent
+      ? "· schedule not published yet — check the link or switch event"
+      : "· can't load the schedule, retrying";
+  } finally {
+    snapshotFetchInFlight = false;
+  }
+  render();
+}
+
+// Shared by the fetch path and cache hydration: adopt a parsed snapshot
+// feed as the current feed and surface its provenance in the footer.
+function applySnapshotFeed(feed, atMs) {
+  lastFeed = feed;
+  buildRiderIndex(feed);
+  rides = extractRides(feed);
+  lastUpdatedMs = atMs;
+  snapshotMeta = feed.snapshot && typeof feed.snapshot === "object" ? feed.snapshot : { };
+  applyFeedIdentity(feed);
 }
 
 let scoringFetchInFlight = false;
@@ -1705,13 +1948,17 @@ async function fetchCalendar() {
   renderPicker();
 }
 
-// Accepts a bare numeric ShowConnectId or a pasted showconnect.org URL
-// containing ShowConnectId=NNN; null if neither.
+// Accepts a bare numeric ShowConnectId, a pasted showconnect.org URL
+// containing ShowConnectId=NNN, a snapshot id ("ee:<key>") or a pasted
+// evententries.com show-center link (#ShowCenter<key>); null if none.
 function parseManualEvent(s) {
   const t = String(s == null ? "" : s).trim();
-  if (/^\d{1,9}$/.test(t)) return parseInt(t, 10);
+  const direct = parseEventId(t);
+  if (direct !== null) return direct;
   const m = /ShowConnectId=(\d+)/i.exec(t);
-  return m && /^\d{1,9}$/.test(m[1]) ? parseInt(m[1], 10) : null;
+  if (m && /^\d{1,9}$/.test(m[1])) return parseInt(m[1], 10);
+  const ee = /evententries\.com\/#ShowCenter([A-Za-z0-9_-]{1,40})/i.exec(t);
+  return ee ? `ee:${ee[1]}` : null;
 }
 
 const RECENT_CAP = 15; // uncapped while searching
@@ -1761,7 +2008,7 @@ function goToManualEvent() {
   const id = parseManualEvent(document.getElementById("picker-manual").value);
   const errEl = document.getElementById("manual-err");
   if (id === null) {
-    errEl.textContent = "Enter a numeric ShowConnectId or a showconnect.org link.";
+    errEl.textContent = "Enter a numeric ShowConnectId, a showconnect.org link, or a hosted-schedule link.";
     errEl.hidden = false;
     return;
   }
@@ -1777,18 +2024,25 @@ document.getElementById("picker-manual").addEventListener("keydown", ev => {
 
 // ---- Share via link (?event=<id>&riders=<name1|name2|…>) ----
 
+// Canonical query for this event: ?event=<id>, plus &k=<token> for a
+// snapshot event so the address bar and share links carry what a new
+// device needs to decrypt the hosted schedule.
+function eventQuery() {
+  return `?event=${eventId}${snapshotToken ? `&k=${snapshotToken}` : ""}`;
+}
+
 function buildShareUrl() {
   const names = effectiveFollowing();
   const base = location.protocol.startsWith("http")
     ? location.origin + location.pathname
     : location.href.split("?")[0];
-  return `${base}?event=${eventId}&riders=${encodeURIComponent(names.join("|"))}`;
+  return `${base}${eventQuery()}&riders=${encodeURIComponent(names.join("|"))}`;
 }
 
 // Normalize the URL to the canonical ?event=<id> (drops riders/choose junk;
 // also upgrades a bare last-event load to an addressable URL).
 function cleanEventUrl() {
-  try { history.replaceState(null, "", location.pathname + "?event=" + eventId); }
+  try { history.replaceState(null, "", location.pathname + eventQuery()); }
   catch (e) { /* some embedded contexts block replaceState */ }
 }
 
@@ -2062,11 +2316,14 @@ if (eventId !== null) {
   try {
     const ev = cacheGet(CACHE_EVENT);
     if (ev && ev.value) {
-      lastFeed = ev.value;
-      buildRiderIndex(ev.value);
-      rides = extractRides(ev.value);
-      lastUpdatedMs = ev.at;
-      applyFeedIdentity(ev.value);
+      if (isSnapshotEvent(eventId)) applySnapshotFeed(ev.value, ev.at);
+      else {
+        lastFeed = ev.value;
+        buildRiderIndex(ev.value);
+        rides = extractRides(ev.value);
+        lastUpdatedMs = ev.at;
+        applyFeedIdentity(ev.value);
+      }
     }
     const sc = cacheGet(CACHE_SCORING);
     if (sc && sc.value) resultsIdx = buildResultsIndex(sc.value);
@@ -2082,11 +2339,18 @@ if (eventId !== null) {
   // the loading placeholder.
   if (effectiveFollowing().length === 0) render();
 
-  fetchEventFeed();
-  fetchScoring();
+  if (isSnapshotEvent(eventId)) {
+    // No live feeds: re-read the hosted file on the slow cadence (a
+    // re-published order of go lands by commit, like config edits).
+    fetchSnapshot();
+    setInterval(fetchSnapshot, SNAPSHOT_POLL_MS);
+  } else {
+    fetchEventFeed();
+    fetchScoring();
+    setInterval(fetchEventFeed, EVENT_POLL_MS);
+    setInterval(fetchScoring, SCORING_POLL_MS);
+  }
   checkForNewDeploy();
-  setInterval(fetchEventFeed, EVENT_POLL_MS);
-  setInterval(fetchScoring, SCORING_POLL_MS);
   setInterval(checkForNewDeploy, DEPLOY_POLL_MS);
   setInterval(render, 30_000); // keep countdowns fresh between fetches
 } else {

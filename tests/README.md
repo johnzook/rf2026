@@ -1,8 +1,9 @@
 # Test suite for index.html
 
 Automated Playwright suite covering every numbered behavior in
-[`../TESTPLAN.md`](../TESTPLAN.md) (items A1–O65 plus the multi-event
-section P66–P82).
+[`../TESTPLAN.md`](../TESTPLAN.md) (items A1–O65, the multi-event
+section P66–P82, pre-event Q83–Q85, round view R86–R93 and snapshot
+events S94–S101).
 
 ## Running
 
@@ -88,12 +89,13 @@ explicit `executablePath` — never run `playwright install`).
 | P66–P71 (URL routing, picker, calendar cache) | `event-picker.test.js` |
 | P72–P76, P82 (per-event storage, migration, identity, tz, empty state, unknown ids) | `multi-event.test.js` |
 | P77–P81 (share links, `?riders=` receiving) | `share.test.js` |
+| S94–S101 (snapshot events: `ee:<key>` ids, link token, order-of-go parser, hosted-file fetch/cache/errors) | `snapshot.test.js` |
 | Bug regressions (`BUG-*`) | `robustness.test.js` |
 | Edge-case hardening (`A/C/E/F/I/J/K-edge`) | `edge-cases.test.js` |
 | O55–O58 (REVIEW fixes wave 1, `R3/R4/R6/R9/R10/R11`) | `persistence` (R3), `my-riders` (R4), `lifecycle` (R6), `days` (R9), `scroll` (R10), `robustness` (R11) |
 | O59–O65 (REVIEW fixes wave 2, `R7/R1/R2/R8/R12a/R12c/R11b`) | `persistence` (R7, R1), `popover` (R2), `done-line` (R8), `lifecycle` (R12a), `scroll` (R12c), `robustness` (R11b) |
 
-All numbered items (A1–P82) are covered; none skipped. Each test name starts with the
+All numbered items (A1–S101) are covered; none skipped. Each test name starts with the
 item number(s) it covers (some tests cover two adjacent items, some items
 get several assertions across tests).
 
@@ -105,6 +107,14 @@ Notes on specific items:
   default to a UTC context, so event-zone independence is exercised
   suite-wide; the device-zone *fallback* when nothing derivable exists is
   covered under P74/P75 in `multi-event.test.js`.)
+- **S94–S101** never read the committed `snapshots/*.json`: each test
+  encrypts a small synthetic order of go with `encryptSnapshot()` from
+  `../tools/snapshot-encrypt.js` (same code the CLI runs) under a fixed
+  token and registers it on the test server with `server.setFile(path,
+  body)`; unregistered paths under `/snapshots/` 404 (the "not published"
+  path), everything else still serves the page. `openPage({ requestLog })`
+  records every request URL so the suite can assert no ShowConnect call is
+  made for a snapshot event.
 - **J44** serves mutated page bytes from the test server and calls
   `checkForNewDeploy()` manually, asserting reload/no-reload via a page
   marker; the `file://` no-op branch is loaded straight from disk (with

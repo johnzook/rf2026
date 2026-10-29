@@ -387,7 +387,9 @@ updated in place for the same refactor.
     (clean state, working back button) and lands in the event view.
 70. Manual entry accepts a bare numeric ShowConnectId or a pasted
     showconnect.org URL containing `ShowConnectId=NNN` (case-insensitive),
-    both bounded to 9 digits (item 66), via the Go button or Enter;
+    both bounded to 9 digits (item 66) — and, since Oct 2026, a snapshot
+    id `ee:<key>` or an evententries show-center link (item 94) — via
+    the Go button or Enter;
     invalid input shows an inline error and
     stays on the picker; a subsequent valid entry navigates.
 71. Calendar caching: `sc:calendar` holds `{at, value}` with a 6 h TTL. A
@@ -625,3 +627,72 @@ the popover; the sheet reuses the my-riders bottom-sheet pattern.
     Scratched-only riders and names not in this feed stay out of the
     section. Read-only: other events' lists are never modified, and
     nothing is auto-followed.
+
+## S. Snapshot events (evententries order of go) (Oct 2026)
+
+Some shows (e.g. Galway Downs) run entries and live scoring on
+evententries.com, whose show centers have no public API, no CORS, and
+Terms of Use that forbid systematic retrieval. For those, a maintainer
+pastes the show center's "Order of Go" text once and commits it as
+`snapshots/ee-<key>.json`, AES-GCM encrypted under a random link token
+(`tools/snapshot-encrypt.js`). The page decrypts it in the browser and
+parses it into the ShowConnect feed shape, so everything downstream of
+`extractRides` is unchanged; there is no scoring feed. Tests build their
+own encrypted fixture from a synthetic order of go and serve it from the
+local test server (`server.setFile`) — the committed snapshot is never read.
+
+94. Event id scheme: `?event=ee:<key>` (key = 1–40 url-safe chars
+    `[A-Za-z0-9_-]`) is an event view with `EVENT_URL`/`SCORING_URL`
+    null and `SNAPSHOT_URL = snapshots/ee-<key>.json`; `ee:`, keys with
+    spaces/dots, or >40 chars fall to the picker like any invalid id.
+    `sc:last-event` is written as `"ee:<key>"` only after a successful
+    load, and a bare URL resumes it. `parseManualEvent` accepts `ee:<key>`
+    and a pasted `https://evententries.com/#ShowCenter<key>` link.
+95. Link token: `&k=<token>` (8–64 url-safe chars) is stored at
+    `sc:ee:<key>:k`; the URL canonicalizes to `?event=ee:<key>&k=<token>`
+    (the token stays in the address bar so copying it works); a bare
+    `?event=ee:<key>` reuses the stored token; `buildShareUrl()` carries
+    `&k=<token>` before `&riders=`; a received `?riders=` link with the
+    token adopts/merges exactly as P79–P80.
+96. `parseOrderOfGo(text, startDate, details)` grammar (one table cell
+    per line, or tab-separated rows): a `Judge(s):` line closes a section
+    header whose title is the previous line and whose ring is the line
+    before that when present — consecutive sections in one ring inherit
+    it; column-header words (Pinney/GoTime/Rider/Horse/Division) are
+    ignored; `<time> Break` rows are skipped (counted in `stats.breaks`);
+    rows without a pinny (`Test Ride`) are skipped (`stats.skipped`);
+    one `EntryList` item per pinny with `Status: "Accepted"`,
+    `Division = DivisionShortName =` the printed code, and one
+    `RidingDetails` row per phase carrying the ring as `Venues[0].venue`;
+    the same combo+phase listed twice keeps the later row; empty, null
+    or garbage text returns an empty `EntryList` without throwing.
+97. Times: `<HH:MM AM|PM> <Mon..Sun>` resolves to the first such weekday
+    on/after `startDate` (wrapping past the start weekday), 12:00 AM/PM
+    handled, and is emitted as a ShowConnect-format `RideTimes` string
+    (`"Thu, Oct 29, 2026, 12:00:00 PM"`) so `parseRideTime` serves both
+    sources. Phase from the section title: "Cross Country …" → Cross
+    Country, "Show Jumping …"/"Stadium …" → Show Jumping, anything else
+    (dressage test names) → Dressage.
+98. Happy path: `fetchSnapshot` reads the file with `cache: "no-store"`,
+    decrypts with the stored token, parses, and takes the normal feed
+    tail (rider index, rides, `lastUpdatedMs`, event name/title from the
+    snapshot's `name`, `eventTz` derived from its `state` via
+    `deriveTz`, cache write, `sc:last-event`). Footer appends the
+    provenance ("Schedule: evententries order of go captured … — no live
+    results"). Results stay empty ("Not posted yet"), no ShowConnect
+    request is ever made, and the file is re-read every
+    `SNAPSHOT_POLL_MS` (a re-published order of go lands by commit).
+99. Cache: the parsed feed (with its `snapshot` meta) is cached at
+    `sc:ee:<key>:event` and hydrates a reload that cannot reach the file
+    (rows + footer note from cache, "can't load the schedule, retrying"
+    in the status line).
+100. Error paths in the status line: no token → "needs the key from the
+    link you were sent"; wrong token (GCM auth failure) → "the key in this
+    link doesn't open this schedule"; 404/non-JSON → "schedule not
+    published yet"; no WebCrypto (insecure context) → "open this page over
+    https"; other failures → retry note. None writes `sc:last-event`, and
+    the page stays usable (add-riders prompt, no page error).
+101. Storage isolation: `pastFollowedNames` and `evictOtherEventCaches`
+    match both `sc:<digits>:…` and `sc:ee:<key>:…` keys — other events'
+    `:event`/`:scoring` blobs are evicted whatever their id shape, every
+    `:riders` list and `:k` token is kept.

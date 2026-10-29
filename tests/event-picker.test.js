@@ -203,7 +203,7 @@ test('P70: manual entry accepts a numeric id or a pasted showconnect URL; Enter 
     await s.page.click('#picker-go');
     assert.equal(await s.page.$eval('#manual-err', el => el.hidden), false);
     assert.equal(await s.page.$eval('#manual-err', el => el.textContent),
-      'Enter a numeric ShowConnectId or a showconnect.org link.');
+      'Enter a numeric ShowConnectId, a showconnect.org link, or a hosted-schedule link.');
     assert.equal(s.page.url(), urlBefore, 'stayed on the picker');
 
     // A later valid entry clears the error and navigates.
