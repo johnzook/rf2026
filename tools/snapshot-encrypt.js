@@ -17,7 +17,12 @@
 //   --token <token>   reuse an existing link token (default: generate a new one)
 //   --captured <str>  provenance note shown in the footer (default: now, local)
 //   --out <file>      output path (default: snapshots/ee-<key>.json)
+//   --scores-url <u>  evententries Live Scores page for the show (linked from ride details)
+//   --links <file>    JSON {"<division code>": "<url>", …} per-level Live Scores links
+//   --scores          encrypt a pasted Live Scores board instead (requires --token;
+//                     writes snapshots/ee-<key>-scores.json; --name/--start/--state unused)
 //   --decrypt         with --key/--token: print the stored plaintext's meta instead
+//                     (add --scores for the scores file)
 //
 // The plaintext never enters the repo: keep the pasted file outside it.
 // Re-run with the same --token to re-publish a revised order of go without
@@ -34,7 +39,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) continue;
     const k = a.slice(2);
-    if (k === 'decrypt') { out.decrypt = true; continue; }
+    if (k === 'decrypt' || k === 'scores') { out[k] = true; continue; }
     out[k] = argv[++i];
   }
   return out;
@@ -56,20 +61,22 @@ function randomToken(n = 20) {
 
 // Pure core (also used by the test suite): build the payload object the
 // page's decryptSnapshot() consumes, and its inverse.
-async function encryptSnapshot({ key, token, name = '', start, state = '', text, captured }) {
+async function encryptSnapshot({ key, token, name = '', start, state = '', text, captured, kind = 'schedule', scoresUrl = '', links = null }) {
   if (!key || !/^[A-Za-z0-9_-]{1,40}$/.test(key)) throw new Error('key must be 1-40 letters/digits/_/-');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '')) throw new Error('start must be YYYY-MM-DD');
+  if (kind !== 'scores' && !/^\d{4}-\d{2}-\d{2}$/.test(start || '')) throw new Error('start must be YYYY-MM-DD');
+  if (kind === 'scores' && !token) throw new Error('a scores snapshot needs the schedule\'s --token');
   token = token || randomToken();
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(token)) throw new Error('token must be 8-64 url-safe chars');
   const salt = b64(webcrypto.getRandomValues(new Uint8Array(16)));
   const iv = webcrypto.getRandomValues(new Uint8Array(12));
-  const plain = JSON.stringify({
-    name, startDate: start, state,
-    capturedAt: captured || new Date().toLocaleString('en-US', {
+  const capturedAt = captured || new Date().toLocaleString('en-US', {
       weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-    }),
-    text: String(text == null ? '' : text),
-  });
+    });
+  const body = kind === 'scores'
+    ? { kind, capturedAt, text: String(text == null ? '' : text) }
+    : { kind, name, startDate: start, state, scoresUrl, links: links && typeof links === 'object' ? links : {},
+        capturedAt, text: String(text == null ? '' : text) };
+  const plain = JSON.stringify(body);
   const k = await keyFor(token, salt, 'encrypt');
   const data = await subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode(plain));
   return { token, payload: { v: 1, key, salt, iv: b64(iv), data: b64(new Uint8Array(data)) } };
@@ -81,11 +88,13 @@ async function decryptSnapshot(payload, token) {
   return JSON.parse(new TextDecoder().decode(plain));
 }
 
-async function encrypt({ key, name, start, state, inFile, token, captured, out }) {
+async function encrypt({ key, name, start, state, inFile, token, captured, out, scores, scoresUrl, linksFile }) {
   if (!inFile) throw new Error('--in <file> is required');
   const text = fs.readFileSync(inFile, 'utf8');
-  const r = await encryptSnapshot({ key, token, name, start, state, text, captured });
-  out = out || path.join(__dirname, '..', 'snapshots', `ee-${key}.json`);
+  const links = linksFile ? JSON.parse(fs.readFileSync(linksFile, 'utf8')) : null;
+  const kind = scores ? 'scores' : 'schedule';
+  const r = await encryptSnapshot({ key, token, name, start, state, text, captured, kind, scoresUrl, links });
+  out = out || path.join(__dirname, '..', 'snapshots', `ee-${key}${scores ? '-scores' : ''}.json`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(r.payload) + '\n');
   console.log(`wrote ${path.relative(process.cwd(), out)} (${fs.statSync(out).size} bytes, ${text.split('\n').length} lines of text)`);
@@ -93,8 +102,8 @@ async function encrypt({ key, name, start, state, inFile, token, captured, out }
   console.log(`link:  ?event=ee:${key}&k=${r.token}`);
 }
 
-async function decrypt({ key, token, out }) {
-  const file = out || path.join(__dirname, '..', 'snapshots', `ee-${key}.json`);
+async function decrypt({ key, token, out, scores }) {
+  const file = out || path.join(__dirname, '..', 'snapshots', `ee-${key}${scores ? '-scores' : ''}.json`);
   const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
   const snap = await decryptSnapshot(payload, token);
   const { text, ...meta } = snap;
@@ -108,8 +117,9 @@ if (require.main === module) {
   (async () => {
     const a = parseArgs(process.argv.slice(2));
     try {
-      if (a.decrypt) await decrypt({ key: a.key, token: a.token, out: a.out });
-      else await encrypt({ key: a.key, name: a.name, start: a.start, state: a.state, inFile: a.in, token: a.token, captured: a.captured, out: a.out });
+      if (a.decrypt) await decrypt({ key: a.key, token: a.token, out: a.out, scores: a.scores });
+      else await encrypt({ key: a.key, name: a.name, start: a.start, state: a.state, inFile: a.in, token: a.token,
+        captured: a.captured, out: a.out, scores: a.scores, scoresUrl: a['scores-url'], linksFile: a.links });
     } catch (e) {
       console.error('error:', e.message);
       process.exit(1);
