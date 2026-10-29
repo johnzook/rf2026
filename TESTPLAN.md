@@ -771,3 +771,55 @@ from their site by the page or by a script. Tests build synthetic boards
     scores.json`, `--decrypt --scores` reads it); a schedule snapshot
     carries `scoresUrl` (`--scores-url`) and `links` (`--links <json>`,
     `{}` when absent).
+
+### General schedule (evententries General Schedule tab)
+
+The schedule snapshot may also carry the show center's "General Schedule"
+tab (`--schedule <file>`, plaintext field `schedule`): per division and
+phase, the ring and the time block. It fills phases the order of go has
+no rider rows for yet — show jumping, published after cross-country —
+with the division's block start, which is exactly the shared-block-start
+shape ShowConnect publishes for SJ, so `sjBlockDivs`, the
+reverse-of-standing round order and `autoEstimate` slot estimates apply
+unchanged. Tests use small synthetic pastes (invented names).
+
+109. `parseGeneralSchedule(text, startDate, hints)` grammar (one cell per
+    line or tab-separated): column header tokens (`Date`, `Ring`, `Time`,
+    `Division`, `Classification`, `Judge(s)`) are ignored; a date line
+    (`Thu, 10/29`) sets the day (year from `startDate`, rolling into the
+    next year when the month precedes the start month); a block is a
+    range line (`09:30-10:22`) followed by the division code and the
+    classification (`Dressage` / `Cross Country` / `Stadium` → Show
+    Jumping, via `oogPhase`); blocks before any date line are dropped.
+    Times carry no AM/PM: `gsHour24` reads hours 1–6 as PM, 7–11 as AM,
+    12 as noon (so `11:20-02:04` spans noon); an end before its start is
+    clamped to the start. Every other line is bare text — a judge or a
+    ring: with `hints.judges` (from the order of go) a judge line is
+    skipped and any other bare line sets the ring; without judge hints a
+    line is a ring only if it is in `hints.venues` or starts with `SJ` /
+    `XC`, else ignored. Rings carry across blocks until the next ring
+    line. Empty, null or garbage input yields `[]`, never a throw.
+110. `parseOrderOfGo` also returns `judges` (names from every `Judge(s):`
+    line, role tags like `(C)` stripped, de-duplicated) and `venues` (the
+    ring headings seen). `applyGeneralSchedule(feed, blocks)` appends, to
+    every entry of a block's division, a `RidingDetails` row for each
+    phase the entry has NO row for — `{Phase, Venues: [{venue: ring}],
+    RideTimes: <block start>, BlockEnd: <block end>, Block: true}`, both
+    times in the ShowConnect `RideTimes` format so `parseRideTime` reads
+    them — and returns the count. Existing rows (individually timed
+    phases) are never touched; applying twice adds nothing; no blocks /
+    no feed are no-ops.
+111. End to end (`fetchSnapshot` applies the schedule when the plaintext
+    carries one; an empty `schedule` leaves the feed as the order of go):
+    filled rows render on their day (a Sunday chip appears), the popover
+    time row reads `10:26 AM–10:52 AM (division block) · <ring>`
+    (`extractRides` carries `blockEnd` for `Block` rows; individually
+    timed rows show a plain time), a division whose entries now share
+    one SJ time lands in `sjBlockDivs` (a single-entry division does not —
+    the >1-identical-times rule stands; neither does one with individual
+    SJ rows), and once a scores snapshot gives placings the SJ round
+    sheet runs in reverse of standing with `~` slot estimates and the
+    timeline row shows `est. slot ~H:MM · Nth of M to jump, by standing`.
+112. Tool: `encryptSnapshot({ schedule })` stores the General Schedule
+    text as `schedule` in the schedule plaintext (`""` when absent; a
+    scores snapshot never carries one); `--schedule <file>` on the CLI.

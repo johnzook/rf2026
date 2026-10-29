@@ -3,7 +3,7 @@
 Automated Playwright suite covering every numbered behavior in
 [`../TESTPLAN.md`](../TESTPLAN.md) (items A1–O65, the multi-event
 section P66–P82, pre-event Q83–Q85, round view R86–R93 and snapshot
-events S94–S108).
+events S94–S112).
 
 ## Running
 
@@ -91,12 +91,13 @@ explicit `executablePath` — never run `playwright install`).
 | P77–P81 (share links, `?riders=` receiving) | `share.test.js` |
 | S94–S101 (snapshot events: `ee:<key>` ids, link token, order-of-go parser, hosted-file fetch/cache/errors) | `snapshot.test.js` |
 | S102–S108 (scores snapshot: Live Scores board parser, cell mapping, phase order, results/links end to end, cache, absent file, tool) | `scores-snapshot.test.js` |
+| S109–S112 (general schedule: block parser, hour heuristic, judge-vs-ring rule, missing-phase fill, SJ block end to end, tool) | `general-schedule.test.js` |
 | Bug regressions (`BUG-*`) | `robustness.test.js` |
 | Edge-case hardening (`A/C/E/F/I/J/K-edge`) | `edge-cases.test.js` |
 | O55–O58 (REVIEW fixes wave 1, `R3/R4/R6/R9/R10/R11`) | `persistence` (R3), `my-riders` (R4), `lifecycle` (R6), `days` (R9), `scroll` (R10), `robustness` (R11) |
 | O59–O65 (REVIEW fixes wave 2, `R7/R1/R2/R8/R12a/R12c/R11b`) | `persistence` (R7, R1), `popover` (R2), `done-line` (R8), `lifecycle` (R12a), `scroll` (R12c), `robustness` (R11b) |
 
-All numbered items (A1–S108) are covered; none skipped. Each test name starts with the
+All numbered items (A1–S112) are covered; none skipped. Each test name starts with the
 item number(s) it covers (some tests cover two adjacent items, some items
 get several assertions across tests).
 
@@ -108,7 +109,7 @@ Notes on specific items:
   default to a UTC context, so event-zone independence is exercised
   suite-wide; the device-zone *fallback* when nothing derivable exists is
   covered under P74/P75 in `multi-event.test.js`.)
-- **S94–S108** never read the committed `snapshots/*.json`: each test
+- **S94–S112** never read the committed `snapshots/*.json`: each test
   encrypts a small synthetic order of go with `encryptSnapshot()` from
   `../tools/snapshot-encrypt.js` (same code the CLI runs) under a fixed
   token and registers it on the test server with `server.setFile(path,

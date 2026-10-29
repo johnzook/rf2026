@@ -328,6 +328,27 @@ and many others enter through it). Verified live:
   cells). `Test Ride` / `Test Horse 2 Star` lines appear without a pinny;
   a horse can be named `PJ`. Scores are cumulative ("To Date Score" after
   XC, "Final Score" after stadium), same semantics as ShowConnect.
+- **General Schedule tab layout** (the third paste, optional): column
+  header tokens (`Date`, `Ring`, `Time`, `Division`, `Classification`,
+  `Judge(s)`), then per day a date line (`Thu, 10/29`), bare ring lines
+  (`Grand Prix`, `Sycamore`, `Eucalptus`, `XC`, `SJ - Grand Prix`, `SJ -
+  Clock Tower`) and per block `HH:MM-HH:MM` / division code /
+  classification (`Dressage`, `Cross Country`, `Stadium`) followed by 0–3
+  judge-name lines. **Times carry no AM/PM**: the parser reads hours 1–6
+  as PM, 7–11 as AM, 12 as noon (show days start ~7 AM; `11:20-02:04`
+  spans noon). **Judge lines and ring lines are both bare text** and
+  indistinguishable by shape; the judge names learned from the order of
+  go's `Judge(s):` lines decide (judge → skip, anything else → ring),
+  with a known-venue / `SJ`/`XC`-prefix fallback when there are no judge
+  hints. Each block fills phases a combo has no order-of-go row for —
+  show jumping, until its order posts — with the division's block start
+  and end. That makes evententries SJ behave exactly like ShowConnect's
+  SJ block model (one shared time per division → `sjBlockDivs` →
+  reverse-of-standing round order + `autoEstimate` slots from pasted
+  placings), with no new code downstream of `extractRides` beyond the
+  block window in the popover. Verified on Galway: 90 blocks, every combo
+  3 phases, 28 SJ block divisions, the individually timed CCI2-L left
+  alone.
   **Parser rule that made it reliable:** with the order-of-go feed loaded,
   a row starts only at an integer that is a known pinny in THAT board's
   division — place cells (1–30 overlap FEI pinnies), ad copy after a
