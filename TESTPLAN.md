@@ -138,7 +138,16 @@ top-level functions directly in a browser context) or a functional test
     division's final phase is complete (every still-competing combo has a
     posted score in the division's last phase per `PhaseOrder`; out combos
     ignored) — placings can change while later riders are on course, so a
-    done-riding combo in a live division stays "currently".
+    done-riding combo in a live division stays "currently". The first
+    place shown carries the field size — `✓ XC 3rd of 15 · currently 2nd
+    overall` — where `divisionField(division)` = accepted entries in the
+    division (or the scoring-row count if larger) minus the WITHDRAWN
+    only (W/IW): eliminated and retired combos started and sit below the
+    finishers, so they stay in the field, the way "5th of 15" is said in
+    eventing; a withdrawal never started. Omitted when the size is unknown
+    (0) or the combo is itself out (its historical place stays bare). The ride popover states the same size
+    once in its Results header ("Results · 15 in NR") instead of on every
+    row.
 32. No places posted and not out: `✓ scores pending · <next|event
     complete>`; `event complete` also appended when finished but overall
     place missing.

@@ -1,5 +1,8 @@
 'use strict';
-// TESTPLAN group H (done-line on completed rides).
+// TESTPLAN group H (done-line on completed rides). Field sizes: DD has 8
+// accepted entries minus 1 withdrawn = 7 (the eliminated one started and
+// counts); EE has 1 entry but 3 scoring rows, retired included = 3 (see
+// item 31's "of N" rule).
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -72,16 +75,16 @@ test('H31: done rides show ✓ phase place + currently/finished overall + next r
   const s = await openPage({ server, feed: doneFeed(), scoring: doneScoring(), now: NOON });
   try {
     const stillRiding = await rowInfo(s.page, 660);
-    assert.equal(stillRiding.countdown, '✓ XC T3rd · currently 2nd overall · next: SJ 3:00 PM',
+    assert.equal(stillRiding.countdown, '✓ XC T3rd of 7 · currently 2nd overall · next: SJ 3:00 PM',
       'shared phase place gets a T prefix');
     // 661 is done riding but a competitor in DD still jumps at 3:00 PM, so
     // the division isn't final — "currently", never "finished", until the
     // last rider of the division's final phase has a posted score.
     const doneButDivisionLive = await rowInfo(s.page, 661);
-    assert.equal(doneButDivisionLive.countdown, '✓ SJ 1st · currently 1st overall');
+    assert.equal(doneButDivisionLive.countdown, '✓ SJ 1st of 7 · currently 1st overall');
     // 668's division EE has all active final-phase scores posted -> finished.
     const finished = await rowInfo(s.page, 668);
-    assert.equal(finished.countdown, '✓ SJ 2nd · finished 2nd overall');
+    assert.equal(finished.countdown, '✓ SJ 2nd of 3 · finished 2nd overall');
   } finally { await s.context.close(); }
 });
 
@@ -90,7 +93,7 @@ test('H32: scores pending / event complete wording', async () => {
   try {
     assert.equal((await rowInfo(s.page, 662)).countdown, '✓ scores pending · next: XC 4:00 PM');
     assert.equal((await rowInfo(s.page, 663)).countdown, '✓ scores pending · event complete');
-    assert.equal((await rowInfo(s.page, 664)).countdown, '✓ XC T3rd · event complete',
+    assert.equal((await rowInfo(s.page, 664)).countdown, '✓ XC T3rd of 7 · event complete',
       'phase place without overall still gets event complete');
   } finally { await s.context.close(); }
 });
@@ -109,7 +112,7 @@ test('H34: next: points at the combo\'s next ride from NOW at its effective (ove
     // Dressage row (8:00) must skip the already-run XC (10:00) and point at
     // tomorrow's SJ, with a weekday label.
     const dressage = await rowInfo(s.page, 667);
-    assert.equal(dressage.countdown, '✓ Dressage 5th · currently 4th overall · next: SJ Sun 3:00 PM');
+    assert.equal(dressage.countdown, '✓ Dressage 5th of 7 · currently 4th overall · next: SJ Sun 3:00 PM');
     // XC row says the same next.
     const xcRows = await s.page.evaluate(() => {
       const rows = [...document.querySelectorAll('#list .row')];
