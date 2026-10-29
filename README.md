@@ -78,11 +78,37 @@ without being republished to the world.
   valid, commit, and open pages pick the new file up within a minute.
 - **What you get:** the timeline, day chips, countdowns, rider picking,
   sharing, the round view's running order, and the delay/override layers.
-  No live results — there is no scoring feed. `EVENT_CONFIGS` entries for
-  these events use the quoted key, e.g. `"ee:ZAsNB86e3r89ldK9": { … }`,
-  with ring names exactly as printed in the order of go.
+  `EVENT_CONFIGS` entries for these events use the quoted key, e.g.
+  `"ee:ZAsNB86e3r89ldK9": { … }`, with ring names exactly as printed in
+  the order of go.
+- **Results (optional):** nothing is live, but you can paste the show's
+  evententries "Live Scores" page (select the whole page, copy, save as
+  text — the chrome and ads are skipped) and publish it under the same
+  token whenever you want fresher results:
+
+  ```sh
+  node tools/snapshot-encrypt.js --scores --key ZAsNB86e3r89ldK9 \
+    --token <the schedule's token> --in ~/galway-scores.txt
+  ```
+
+  That writes `snapshots/ee-<key>-scores.json`; commit it and open pages
+  pick it up within a minute. Ride popovers then show per-phase and
+  overall results, and the round view shows places and progress. Re-paste
+  by hand as often as you like; delete the file to go back to "Not posted
+  yet". The footer says when each snapshot was captured.
+- **Links to the live source:** `--scores-url <url>` (the show's Live
+  Scores page) and `--links <file.json>` (`{"<division code>": "<url>"}`
+  for the per-level pages) on the schedule publish add a "live scores ↗"
+  link to each ride's details and the round view — a plain outbound link
+  to evententries' own page, per division where you gave one, else the
+  show-wide page.
+- **Be a good citizen:** every copy here is a person copying a page their
+  terms let them download once. Keep it that way — no scripts on a timer,
+  no scrapers, however slow: their Terms of Use forbid systematic
+  retrieval, and the page itself never contacts their servers.
 - `node tools/snapshot-encrypt.js --decrypt --key <key> --token <token>`
-  prints a snapshot's metadata to check what's published.
+  (add `--scores` for the results file) prints a snapshot's metadata to
+  check what's published.
 
 ## Features
 

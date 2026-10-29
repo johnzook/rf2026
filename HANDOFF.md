@@ -306,15 +306,49 @@ and many others enter through it). Verified live:
   only Breaks until XC is done** (order is reverse of standing, published
   later) — re-publish the snapshot then. Ride Times tab is the same data
   per rider ("Last, First"); Live Scores name riders "First Last (USA)".
-  Pinny is unique show-wide, so a pinny+division join would work as on
-  ShowConnect if scores were ever wired in.
+  Pinny is unique show-wide, so a pinny+division join works as on
+  ShowConnect — which is how the scores snapshot (below) is joined.
+- **Live Scores board layout** (`evententries.com/#LiveScores<boardkey>`,
+  one page for the whole show; per-level pages exist with their own
+  keys). Copying the entire page gives: site chrome, then per division a
+  header line with the division name, its code in parentheses and the
+  event name run together (`Novice Rider (NR)The Eventing Championships
+  at Galway Downs(Oct. 2026)`; some names carry two paren groups —
+  `Modified/Training - Championship (OT CHAMPS) (M/T-CH)The …` — and the
+  code is the group that runs straight into the event name), then a
+  judge line (`Judge: Wendy Wergeles` or `Jdg @ M: Debbie Adams, Jdg @ C:
+  Peter Gray, Jdg @ E: Bea di Grazia`), then the column names one per
+  line (`#`, `Rider`, `Horse`, 0–3 × `Jdg @ X`, `Dress`, `Score`, `To
+  Date`, `Place`, `XC`, `Jump`, `XC`, `Elapsed`, `XC`, `Time`, `To Date`,
+  `Score`, `To Date`, `Place`, `Stad`, `Jump`, `Time`, `Pen`, `Final`,
+  `Score`, `Final`, `Place`), then rows: pinny (may carry a trailing tab),
+  `First Last (USA)` (country optional), horse, and ONLY the cells that
+  have posted — blanks are dropped from the copy (3-judge dressage reads
+  `70.00 68.13 67.71 31.4 1`, single-judge `18.3 1`, nothing yet = no
+  cells). `Test Ride` / `Test Horse 2 Star` lines appear without a pinny;
+  a horse can be named `PJ`. Scores are cumulative ("To Date Score" after
+  XC, "Final Score" after stadium), same semantics as ShowConnect.
+  **Parser rule that made it reliable:** with the order-of-go feed loaded,
+  a row starts only at an integer that is a known pinny in THAT board's
+  division — place cells (1–30 overlap FEI pinnies), ad copy after a
+  number and other divisions' pinnies all fail that test, and a
+  code-shaped horse name passes. **Known unknown:** the XC and stadium
+  cell layout (`XC Jump`, `Elapsed`, `Time`, `To Date Score/Place`, `Stad
+  Jump`, `Time Pen`, `Final Score/Place`) is inferred from the column
+  names; the parser anchors the XC block on the `m:ss` elapsed cell and
+  takes the last two cells as the final pair, but no XC or SJ rows had
+  posted when it was written. Verify against a paste after XC.
 
 **Design chosen:** the one-copy snapshot (section S of TESTPLAN,
 `tools/snapshot-encrypt.js`): a human copies the order of go once, the
 repo hosts it AES-GCM encrypted under a random link token, the page
 decrypts and parses it into the ShowConnect feed shape. No automated
 retrieval from their servers, no proxy, no plaintext in the public repo,
-and everything downstream of `extractRides` reused unchanged. Trade-offs
-accepted: no live results, manual re-publish when the order changes, and
+and everything downstream of `extractRides` reused unchanged. Results
+come the same way: an optional pasted Live Scores board, encrypted under
+the same token (`--scores`), parsed into the scoringLive shape and joined
+on pinny + division code; plus outbound "live scores ↗" links to their
+own per-level pages. Trade-offs accepted: nothing live (hand re-paste
+for both files; never a script on a timer — their terms), and
 `"First Last"` rider names (so names followed on ShowConnect events don't
 cross-match in the "followed at other events" header).

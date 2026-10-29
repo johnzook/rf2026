@@ -318,7 +318,7 @@ test('S98: the hosted snapshot decrypts and renders — rows, chips, name/title,
     assert.equal(r.title, 'Snapshot Test Event — Ride Times');
     assert.equal(r.tz, 'America/Los_Angeles');
     assert.match(r.footer, /\(PDT\)/);
-    assert.match(r.footer, /evententries order of go captured Thu Oct 29, 9:00 AM PDT — no live results/);
+    assert.match(r.footer, /evententries order of go captured Thu Oct 29, 9:00 AM PDT; results not loaded — nothing here is live/);
     assert.equal(r.err, '');
     assert.match(r.status, /^Updated 8:00 AM/);
     assert.deepEqual(r.rides, [
@@ -363,7 +363,7 @@ test('S99: the parsed feed is cached at sc:ee:<key>:event and hydrates a reload 
     }));
     assert.equal(r.err, '· can\'t load the schedule, retrying');
     assert.equal(r.name, 'Snapshot Test Event');
-    assert.match(r.footer, /no live results/);
+    assert.match(r.footer, /nothing here is live/);
     assert.equal(r.n, 4);
     assert.ok(await rowInfo(s.page, 101), 'rows rendered from cache');
     assert.equal(s.page.__pageError, undefined);

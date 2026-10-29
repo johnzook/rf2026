@@ -678,8 +678,9 @@ local test server (`server.setFile`) — the committed snapshot is never read.
     tail (rider index, rides, `lastUpdatedMs`, event name/title from the
     snapshot's `name`, `eventTz` derived from its `state` via
     `deriveTz`, cache write, `sc:last-event`). Footer appends the
-    provenance ("Schedule: evententries order of go captured … — no live
-    results"). Results stay empty ("Not posted yet"), no ShowConnect
+    provenance ("Schedule: evententries order of go captured …; results
+    not loaded — nothing here is live"). Results stay empty ("Not posted
+    yet") until a scores snapshot (S102–S108) loads, no ShowConnect
     request is ever made, and the file is re-read every
     `SNAPSHOT_POLL_MS` (a re-published order of go lands by commit).
 99. Cache: the parsed feed (with its `snapshot` meta) is cached at
@@ -696,3 +697,77 @@ local test server (`server.setFile`) — the committed snapshot is never read.
     match both `sc:<digits>:…` and `sc:ee:<key>:…` keys — other events'
     `:event`/`:scoring` blobs are evicted whatever their id shape, every
     `:riders` list and `:k` token is kept.
+
+### Scores snapshot (evententries Live Scores board)
+
+An optional second file, `snapshots/ee-<key>-scores.json`, encrypted under
+the same token (`tools/snapshot-encrypt.js --scores --token <token>`),
+holds a pasted copy of the show's evententries "Live Scores" page. It is
+re-pasted by hand whenever fresher results are wanted — never fetched
+from their site by the page or by a script. Tests build synthetic boards
+(invented names) and serve both files with `server.setFile`.
+
+102. `parseScoreboard(text, feed)` grammar (one cell per line, or
+    tab-separated): page chrome before the first board is ignored. A
+    division header is a name-like line followed by a judge line with
+    names (`Judge: …` / `Jdg @ M: …, …`); the column tokens that follow
+    (`#`, `Rider`, `Horse`, 0–3 × `Jdg @ X`, `Dress`, `Score`, `To
+    Date`, `Place`, `XC`, `Jump`, `Elapsed`, `Time`, `Stad`, `Pen`,
+    `Final`) never read as headers (no colon). The division code is the
+    first `(…)` group that runs straight into the event name ("Open
+    Novice (OP)The Eventing…"; "… (OT CHAMPS) (M/T-CH)The …" → `M/T-CH`),
+    else the last group. Rows are pinny / rider ("First Last (USA)",
+    country optional) / horse / only the posted cells (blanks are dropped
+    from the copy). With a feed, a row starts only at an integer that is
+    a pinny in THIS board's division (so a place cell before the next
+    header, ad copy after a number, and a pinny from another division are
+    not rows, and a horse named like a code — "PJ" — is admitted); without
+    a feed the shape heuristic (integer + two name-like lines) decides.
+    Pinny-less `Test Ride` rows and unrecognized lines are counted in
+    `stats.skipped` with up to 10 `stats.skippedSamples`. Output mirrors
+    scoringLive: `DivisionsList[{DivisionId, DivisionName (= the code,
+    which is the order-of-go feed's `Division`), PhaseOrder}]` and
+    `ScoringList[{Pinny, DivisionId, RiderName, HorseName, …fields}]`;
+    empty or garbage text yields empty lists without throwing.
+103. `scoreboardCells(cells, judges)`: the first `judges` cells are judge
+    marks, then `DressageScore`, `DressagePlace`; the XC block is anchored
+    on the `XC Elapsed` cell (`m:ss`) — `XCScore`/`XCPlace` are the two
+    cells after `XC Time`, whether or not a leading `XC Jump` cell was
+    posted — or, with no elapsed cell but ≥ J+7 cells, positional; the
+    stadium block is whatever follows and its last two cells are
+    `SJScore`/`SJPlace`. `FinalPoints`/`FinalPlace` fall through SJ → XC →
+    dressage. An out code (`E`, `R`, `W`, `RF`, …) anywhere becomes
+    `FinalPlace` and the place of the phase it sits in (after the XC
+    block → SJ, after dressage → XC, else dressage); cells after it are
+    ignored. Missing values are `"--"` (parse to NaN like scoringLive).
+    Known unknown: the XC/SJ cell layout is inferred from the column names
+    and unverified until those phases post.
+104. `phaseOrderFromFeed(feed)`: per division, phases ordered by their
+    earliest ride time (`d`/`xc`/`sj`), with phases not yet in the order
+    of go appended in the usual order (SJ posts after XC: "d-xc" →
+    "d-xc-sj"; a d-sj-xc division stays d-sj-xc) so a division is never
+    "complete" before its last phase is scheduled; divisions absent from
+    the feed default to `d-xc-sj` in `DivisionsList`.
+105. Happy path: `fetchScoresSnapshot` (after the schedule, and on the
+    `SNAPSHOT_POLL_MS` cadence) reads the file with `cache: "no-store"`,
+    decrypts with the stored token, parses against `lastFeed`, rebuilds
+    `resultsIdx`, caches, and re-renders: ride popovers show the per-phase
+    and Overall result rows, the round sheet shows places and "all N
+    scores posted", and the footer says "results captured <capturedAt>".
+    Live-scores link: `liveScoresUrl(division)` is the schedule snapshot's
+    `links[code]` if present, else its `scoresUrl`, and only if http(s);
+    rendered as `live scores ↗` (new tab, `rel=noopener`) after the
+    popover's round button and in the round sheet's progress line; absent
+    when neither applies or the value is not http(s).
+106. Cache: the parsed board (with `snapshot: {capturedAt}`) is cached at
+    `sc:ee:<key>:scoring` and hydrates a reload that cannot reach the
+    files (`resultsIdx`, `scoresMeta`, footer).
+107. Absent/unreadable: a 404 (not published), a non-JSON body, a file
+    under another token or a bad shape are ignored silently — results
+    stay "Not posted yet", the footer says "results not loaded", nothing
+    is cached, no status-line error, no page error.
+108. Tool: `encryptSnapshot({ kind: "scores" })` requires the schedule's
+    token and writes `{kind, capturedAt, text}` (`--scores` → `ee-<key>-
+    scores.json`, `--decrypt --scores` reads it); a schedule snapshot
+    carries `scoresUrl` (`--scores-url`) and `links` (`--links <json>`,
+    `{}` when absent).
