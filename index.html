@@ -1952,7 +1952,8 @@ function applyGeneralSchedule(feed, blocks) {
 const SB_NUM_RE = /^-?\d+(\.\d+)?$/;
 const SB_TIME_RE = /^\d+:\d{2}(\.\d+)?$/;
 const SB_CODE_RE = /^[A-Z]{1,3}$/; // E, R, W, RF, TE, MR, IE, IW, DNS…
-const SB_CELL_RE = /^(-?\d+(\.\d+)?|\d+:\d{2}(\.\d+)?|[A-Z]{1,3})$/;
+const SB_TIE_RE = /^(\d+)-?T$/i;   // tied place as the board renders it ("4-T")
+const SB_CELL_RE = /^(-?\d+(\.\d+)?|\d+:\d{2}(\.\d+)?|[A-Z]{1,3}|\d+-?T)$/i;
 const SB_NAMEISH = s => /[A-Za-z]/.test(s) && !SB_CELL_RE.test(s);
 // The judge line under a division header carries names ("Jdg @ M: Debbie
 // Adams, …" / "Judge: Wendy Wergeles"); the column tokens ("Jdg @ M") do
@@ -1994,7 +1995,34 @@ function parseScoreboard(text, feed) {
   const stats = { rows: 0, divisions: 0, skipped: 0, skippedSamples: [] };
   const skip = line => { stats.skipped++; if (stats.skippedSamples.length < 10) stats.skippedSamples.push(line); };
   let code = null, judges = 0, headerDone = false;
-  const isHeader = i => SB_NAMEISH(lines[i]) && SB_JUDGE_LINE.test(lines[i + 1] || "");
+  // Division code from a header line: the first "(…)" that runs straight
+  // into the event name ("Open Preliminary (OP)The Eventing…"), else the
+  // last one. Valid only if the order of go knows the division (or, with
+  // no feed, if it is code-shaped: no spaces, short) — this is what keeps
+  // the line BEFORE a header ("Results are not final…", a zero-score row's
+  // horse) and the event-name line ("…Galway Downs(Oct. 2026)") from being
+  // mistaken for the header.
+  const feedDivs = new Set();
+  for (const e of (feed && Array.isArray(feed.EntryList)) ? feed.EntryList : [])
+    if (e && e.Division) feedDivs.add(e.Division);
+  const codeOf = line => {
+    const groups = [...String(line || "").matchAll(/\(([^()]+)\)(?=(\S|$))/g)];
+    const pick = groups.find(g => g[2]) || groups[groups.length - 1];
+    return pick ? pick[1].trim() : "";
+  };
+  const codeValid = c => c && (feedDivs.size ? feedDivs.has(c) : /^[A-Za-z0-9\/.\-]{1,14}$/.test(c));
+  // A division header is a name-like line with a valid code whose judge
+  // line follows directly (event name glued on by the copy) or one line
+  // later (a browser's innerText puts the event name on its own line).
+  // Returns the judge line's index, or -1.
+  const headerAt = i => {
+    if (!SB_NAMEISH(lines[i] || "") || !codeValid(codeOf(lines[i]))) return -1;
+    if (SB_JUDGE_LINE.test(lines[i + 1] || "")) return i + 1;
+    if (SB_NAMEISH(lines[i + 1] || "") && !codeValid(codeOf(lines[i + 1]))
+        && SB_JUDGE_LINE.test(lines[i + 2] || "")) return i + 2;
+    return -1;
+  };
+  const isHeader = i => headerAt(i) !== -1;
   // Pinny -> division from the order-of-go feed. With a feed, a row starts
   // only at an integer that is a known pinny IN THIS BOARD'S DIVISION —
   // which rules out place cells, page chrome and ad copy that happen to
@@ -2014,18 +2042,15 @@ function parseScoreboard(text, feed) {
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (isHeader(i)) {
-      // Division code: the first "(…)" that runs straight into the event
-      // name ("Open Preliminary (OP)The Eventing…"); else the last one.
-      const groups = [...line.matchAll(/\(([^()]+)\)(?=(\S|$))/g)];
-      const pick = groups.find(g => g[2]) || groups[groups.length - 1];
-      code = pick ? pick[1].trim() : line.trim();
+    const judgeLine = headerAt(i);
+    if (judgeLine !== -1) {
+      code = codeOf(line);
       if (!divisions.has(code)) {
         divisions.set(code, { DivisionId: code, DivisionName: code, PhaseOrder: orders[code] || "d-xc-sj" });
         stats.divisions++;
       }
       judges = 0; headerDone = false;
-      i += 1; // the judge line
+      i = judgeLine;
       continue;
     }
     if (code === null) continue; // page chrome before the first board
@@ -2060,6 +2085,7 @@ function parseScoreboard(text, feed) {
 function scoreboardCells(cells, judges) {
   const r = { DressageScore: "--", DressagePlace: "--", XCScore: "--", XCPlace: "--",
               SJScore: "--", SJPlace: "--", FinalPoints: "--", FinalPlace: "--" };
+  cells = cells.map(c => { const t = SB_TIE_RE.exec(c); return t ? t[1] : c; }); // "4-T" → "4" (ties are re-derived from equal places)
   const codeAt = cells.findIndex(c => SB_CODE_RE.test(c));
   const vals = codeAt === -1 ? cells : cells.slice(0, codeAt);
   const code = codeAt === -1 ? null : cells[codeAt];

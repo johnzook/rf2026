@@ -328,6 +328,14 @@ and many others enter through it). Verified live:
   cells). `Test Ride` / `Test Horse 2 Star` lines appear without a pinny;
   a horse can be named `PJ`. Scores are cumulative ("To Date Score" after
   XC, "Final Score" after stadium), same semantics as ShowConnect.
+  **The same board as a browser's `innerText`** (what
+  `tools/snapshot-fetch.js` saves) differs in three ways from a macOS
+  copy: the division line and the event name are separate lines
+  (`CCI Four Star - L (CCI4-L)` / `The Eventing Championships at Galway
+  Downs(Oct. 2026)` / `Jdg @ M: …`), cells are padded with blank and
+  tab-only lines, and a tied place renders as `4-T`. The parser accepts
+  both forms (same 251 rows / 30 divisions on Galway) and normalizes
+  `4-T` → `4`, leaving tie display to the page's equal-places rule.
 - **General Schedule tab layout** (the third paste, optional): column
   header tokens (`Date`, `Ring`, `Time`, `Division`, `Classification`,
   `Judge(s)`), then per day a date line (`Thu, 10/29`), bare ring lines
@@ -349,11 +357,17 @@ and many others enter through it). Verified live:
   block window in the popover. Verified on Galway: 90 blocks, every combo
   3 phases, 28 SJ block divisions, the individually timed CCI2-L left
   alone.
-  **Parser rule that made it reliable:** with the order-of-go feed loaded,
+  **Parser rules that made it reliable:** with the order-of-go feed loaded,
   a row starts only at an integer that is a known pinny in THAT board's
   division — place cells (1–30 overlap FEI pinnies), ad copy after a
   number and other divisions' pinnies all fail that test, and a
-  code-shaped horse name passes. **Known unknown:** the XC and stadium
+  code-shaped horse name passes. And a division header is only a line
+  whose paren code the feed knows (shape-checked without a feed), with
+  the judge line directly after it or one line later: that is what keeps
+  the line before a header (the "Results are not final" banner, a
+  zero-score row's horse) and the event-name line (`(Oct. 2026)`) from
+  being taken as the header — one wrong header cascades, because every
+  row under it then fails the pinny-in-this-division test. **Known unknown:** the XC and stadium
   cell layout (`XC Jump`, `Elapsed`, `Time`, `To Date Score/Place`, `Stad
   Jump`, `Time Pen`, `Final Score/Place`) is inferred from the column
   names; the parser anchors the XC block on the `m:ss` elapsed cell and
@@ -369,7 +383,10 @@ and everything downstream of `extractRides` reused unchanged. Results
 come the same way: an optional pasted Live Scores board, encrypted under
 the same token (`--scores`), parsed into the scoringLive shape and joined
 on pinny + division code; plus outbound "live scores ↗" links to their
-own per-level pages. Trade-offs accepted: nothing live (hand re-paste
-for both files; never a script on a timer — their terms), and
+own per-level pages. `tools/snapshot-fetch.js` does the copy step with
+a headless browser when a person runs it (the same page loads a visitor
+makes, once; a 10-minute spacing guard; never a timer or CI — their
+terms). Trade-offs accepted: nothing live (a human triggers every
+refresh), and
 `"First Last"` rider names (so names followed on ShowConnect events don't
 cross-match in the "followed at other events" header).
