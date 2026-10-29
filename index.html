@@ -677,6 +677,7 @@ function extractRides(feed) {
         dayKey: isoDay(override || when), // an override can move a ride's day
         phase: rd.Phase,
         venue: (rd.Venues && rd.Venues[0] && rd.Venues[0].venue) || "",
+        blockEnd: rd.Block ? parseRideTime(rd.BlockEnd) : null, // division block window (snapshot events)
         rider: e.RiderName,
         horse: e.HorseName,
         pinny: e.PinnyNumber,
@@ -960,6 +961,8 @@ function popoverHTML(ride, adj, delayMin) {
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(revised; sched ${fmtClock(ride.when)})</span>`
     : delayMin
     ? `${fmtClock(adj)} <span style="color:var(--delay)">(sched ${fmtClock(ride.when)}, +${delayMin} min ${esc(ride.venue)})</span>`
+    : ride.blockEnd
+    ? `${fmtClock(ride.when)}–${fmtClock(ride.blockEnd)} <span class="pending">(division block)</span>`
     : fmtClock(ride.when);
   // Scored phases link through to the division's round view; Phases A/B/C
   // carry no scoring fields, so there is no round to show.
@@ -1702,6 +1705,7 @@ function parseOrderOfGo(text, startDate, details) {
   };
   const combos = new Map(); // pinny -> entry
   const stats = { rides: 0, breaks: 0, skipped: 0, sections: 0 };
+  const judges = new Set(), venues = new Set();
   let ring = "", pending = [], pinny = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -1711,6 +1715,11 @@ function parseOrderOfGo(text, startDate, details) {
       const title = pending.length ? pending[pending.length - 1] : "";
       const maybeRing = pending.length > 1 ? pending[pending.length - 2] : "";
       if (maybeRing && !OOG_HEADER_WORDS.has(maybeRing.toLowerCase())) ring = maybeRing;
+      if (ring) venues.add(ring);
+      // "Judge(s): Debbie Adams (M), Peter Gray (C)" → the names, so the
+      // general-schedule parser can tell a judge line from a ring line.
+      for (const j of line.replace(/^judge\(s\):?/i, "").split(","))
+        { const n = j.replace(/\([^)]*\)/g, "").trim(); if (n) judges.add(n); }
       stats.sections++;
       pending = []; pinny = null;
       pending.title = title;
@@ -1751,7 +1760,8 @@ function parseOrderOfGo(text, startDate, details) {
     pinny = null;
   }
   const det = Object.assign({ EventName: "" }, details && typeof details === "object" ? details : {});
-  return { EventDetails: det, EntryList: [...combos.values()], stats };
+  return { EventDetails: det, EntryList: [...combos.values()], stats,
+           judges: [...judges], venues: [...venues] };
 }
 
 // AES-GCM key from the link token: SHA-256(token + salt). The token is a
@@ -1812,6 +1822,11 @@ async function fetchSnapshot() {
       // the venue's state for exactly that.
       EventAddress: typeof snap.state === "string" ? snap.state : "",
     });
+    if (typeof snap.schedule === "string" && snap.schedule.trim()) {
+      applyGeneralSchedule(feed, parseGeneralSchedule(snap.schedule, snap.startDate,
+        { judges: feed.judges, venues: feed.venues }));
+    }
+    delete feed.judges; delete feed.venues;
     feed.snapshot = {
       name: snap.name, startDate: snap.startDate, capturedAt: snap.capturedAt,
       scoresUrl: typeof snap.scoresUrl === "string" ? snap.scoresUrl : "",
@@ -1840,6 +1855,82 @@ async function fetchSnapshot() {
     snapshotFetchInFlight = false;
   }
   render();
+}
+
+// ---- General schedule (evententries "General Schedule" tab, pasted) ----
+// Per division and phase, the ring and the time block ("10:26-10:52"),
+// grouped under date lines ("Sun, 11/01") and ring lines. Used to fill
+// phases the order of go has no rider rows for yet — show jumping, whose
+// order is posted after cross country — with the division's block start,
+// exactly the shared-block-start shape ShowConnect publishes for SJ: the
+// page then treats the division as an SJ block (reverse-of-standing
+// order, slot estimates from live placings). Times carry no AM/PM: hours
+// 1–6 are read as PM, 7–12 as AM with 12 as noon (show days start ~7 AM).
+// Ring vs judge lines are both bare text; judge names learned from the
+// order of go decide, else a line is a ring only if it is a known venue
+// or starts with "SJ"/"XC".
+const GS_DATE_RE = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\w*,\s*(\d{1,2})\/(\d{1,2})$/i;
+const GS_RANGE_RE = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/;
+const GS_HEADER_WORDS = new Set(["date", "ring", "time", "division", "classification", "judge(s)", "judges", "judge"]);
+function gsHour24(h) { h = +h; return h >= 7 && h <= 11 ? h : h === 12 ? 12 : h + 12; }
+function parseGeneralSchedule(text, startDate, hints) {
+  const lines = String(text == null ? "" : text).split(/\r?\n/)
+    .flatMap(l => l.split("\t")).map(s => s.trim()).filter(Boolean);
+  const judges = new Set(((hints && hints.judges) || []).map(j => j.toLowerCase()));
+  const venues = new Set(((hints && hints.venues) || []).map(v => v.toLowerCase()));
+  const start = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startDate || ""));
+  const year0 = start ? +start[1] : new Date().getFullYear();
+  const mon0 = start ? +start[2] : 1;
+  const blocks = [];
+  let date = null, ring = "";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (GS_HEADER_WORDS.has(line.toLowerCase())) continue;
+    const dm = GS_DATE_RE.exec(line);
+    if (dm) {
+      const mo = +dm[2], d = +dm[3];
+      date = new Date(mo < mon0 ? year0 + 1 : year0, mo - 1, d); // Dec→Jan wrap
+      continue;
+    }
+    const rm = GS_RANGE_RE.exec(line);
+    if (rm) {
+      const division = lines[i + 1] || "", cls = lines[i + 2] || "";
+      i += 2;
+      if (!date || !division || !cls) continue;
+      const mk = (h, m) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), gsHour24(h), +m);
+      let s = mk(rm[1], rm[2]), e = mk(rm[3], rm[4]);
+      if (e < s) e = s;
+      blocks.push({ division, phase: oogPhase(cls), ring, start: s, end: e });
+      continue;
+    }
+    // Bare text: a judge (skip) or a ring.
+    const low = line.toLowerCase();
+    if (judges.has(low)) continue;
+    if (judges.size || venues.has(low) || /^(sj|xc)\b/i.test(line)) ring = line;
+  }
+  return blocks;
+}
+function rideTimeString(d) {
+  const h = d.getHours(), h12 = h % 12 || 12;
+  return `${OOG_WEEKDAY_NAMES[d.getDay()]}, ${OOG_MONTH_NAMES[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${h12}:${String(d.getMinutes()).padStart(2, "0")}:00 ${h < 12 ? "AM" : "PM"}`;
+}
+// Fill each entry's missing phases from the division's schedule blocks.
+// Existing rows (individually timed phases) are never touched. Added rows
+// carry BlockEnd so the popover can show the whole window.
+function applyGeneralSchedule(feed, blocks) {
+  const byDiv = Object.create(null);
+  for (const b of blocks || []) (byDiv[b.division] = byDiv[b.division] || []).push(b);
+  let added = 0;
+  for (const e of (feed && Array.isArray(feed.EntryList)) ? feed.EntryList : []) {
+    for (const b of byDiv[e.Division] || []) {
+      if (!Array.isArray(e.RidingDetails)) e.RidingDetails = [];
+      if (e.RidingDetails.some(rd => rd && rd.Phase === b.phase)) continue;
+      e.RidingDetails.push({ Phase: b.phase, Venues: [{ venue: b.ring || null }],
+        RideTimes: rideTimeString(b.start), BlockEnd: rideTimeString(b.end), Block: true });
+      added++;
+    }
+  }
+  return added;
 }
 
 // ---- Scores snapshot (evententries "Live Scores" board, pasted) ----

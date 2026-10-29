@@ -17,6 +17,9 @@
 //   --token <token>   reuse an existing link token (default: generate a new one)
 //   --captured <str>  provenance note shown in the footer (default: now, local)
 //   --out <file>      output path (default: snapshots/ee-<key>.json)
+//   --schedule <file> the show center's "General Schedule" tab, pasted: per-division
+//                     ring + time block per phase; fills phases the order of go has no
+//                     rider rows for yet (show jumping) with the division's block start
 //   --scores-url <u>  evententries Live Scores page for the show (linked from ride details)
 //   --links <file>    JSON {"<division code>": "<url>", …} per-level Live Scores links
 //   --scores          encrypt a pasted Live Scores board instead (requires --token;
@@ -61,7 +64,7 @@ function randomToken(n = 20) {
 
 // Pure core (also used by the test suite): build the payload object the
 // page's decryptSnapshot() consumes, and its inverse.
-async function encryptSnapshot({ key, token, name = '', start, state = '', text, captured, kind = 'schedule', scoresUrl = '', links = null }) {
+async function encryptSnapshot({ key, token, name = '', start, state = '', text, captured, kind = 'schedule', scoresUrl = '', links = null, schedule = '' }) {
   if (!key || !/^[A-Za-z0-9_-]{1,40}$/.test(key)) throw new Error('key must be 1-40 letters/digits/_/-');
   if (kind !== 'scores' && !/^\d{4}-\d{2}-\d{2}$/.test(start || '')) throw new Error('start must be YYYY-MM-DD');
   if (kind === 'scores' && !token) throw new Error('a scores snapshot needs the schedule\'s --token');
@@ -75,6 +78,7 @@ async function encryptSnapshot({ key, token, name = '', start, state = '', text,
   const body = kind === 'scores'
     ? { kind, capturedAt, text: String(text == null ? '' : text) }
     : { kind, name, startDate: start, state, scoresUrl, links: links && typeof links === 'object' ? links : {},
+        schedule: String(schedule == null ? '' : schedule),
         capturedAt, text: String(text == null ? '' : text) };
   const plain = JSON.stringify(body);
   const k = await keyFor(token, salt, 'encrypt');
@@ -88,12 +92,13 @@ async function decryptSnapshot(payload, token) {
   return JSON.parse(new TextDecoder().decode(plain));
 }
 
-async function encrypt({ key, name, start, state, inFile, token, captured, out, scores, scoresUrl, linksFile }) {
+async function encrypt({ key, name, start, state, inFile, token, captured, out, scores, scoresUrl, linksFile, scheduleFile }) {
   if (!inFile) throw new Error('--in <file> is required');
   const text = fs.readFileSync(inFile, 'utf8');
   const links = linksFile ? JSON.parse(fs.readFileSync(linksFile, 'utf8')) : null;
+  const schedule = scheduleFile ? fs.readFileSync(scheduleFile, 'utf8') : '';
   const kind = scores ? 'scores' : 'schedule';
-  const r = await encryptSnapshot({ key, token, name, start, state, text, captured, kind, scoresUrl, links });
+  const r = await encryptSnapshot({ key, token, name, start, state, text, captured, kind, scoresUrl, links, schedule });
   out = out || path.join(__dirname, '..', 'snapshots', `ee-${key}${scores ? '-scores' : ''}.json`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(r.payload) + '\n');
@@ -106,9 +111,10 @@ async function decrypt({ key, token, out, scores }) {
   const file = out || path.join(__dirname, '..', 'snapshots', `ee-${key}${scores ? '-scores' : ''}.json`);
   const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
   const snap = await decryptSnapshot(payload, token);
-  const { text, ...meta } = snap;
+  const { text, schedule, ...meta } = snap;
   console.log(JSON.stringify(meta, null, 2));
   console.log(`text: ${text.length} chars, ${text.split('\n').length} lines`);
+  if (schedule) console.log(`schedule: ${schedule.length} chars, ${schedule.split('\n').length} lines`);
 }
 
 module.exports = { encryptSnapshot, decryptSnapshot, randomToken };
@@ -119,7 +125,7 @@ if (require.main === module) {
     try {
       if (a.decrypt) await decrypt({ key: a.key, token: a.token, out: a.out, scores: a.scores });
       else await encrypt({ key: a.key, name: a.name, start: a.start, state: a.state, inFile: a.in, token: a.token,
-        captured: a.captured, out: a.out, scores: a.scores, scoresUrl: a['scores-url'], linksFile: a.links });
+        captured: a.captured, out: a.out, scores: a.scores, scoresUrl: a['scores-url'], linksFile: a.links, scheduleFile: a.schedule });
     } catch (e) {
       console.error('error:', e.message);
       process.exit(1);
