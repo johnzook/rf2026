@@ -882,14 +882,17 @@ function tiedAt(divisionName, field, place) {
   return n > 1;
 }
 // Size of the field a place is measured against: accepted combos in the
-// division (from the entry list) minus those the scoring feed marks out
-// (E/R/W…), so "5th of 15" answers "of how many still in it". Falls back
-// to the scoring rows when the entry list doesn't know the division; 0
-// when neither does (callers then omit the "of N").
+// division (from the entry list) minus the withdrawn, so "5th of 15"
+// reads as eventing people say it — of those who started. Eliminated and
+// retired combos started and are placed below everyone who completed, so
+// they stay in the count; a withdrawal never started (or left the
+// competition before being placed) and doesn't. Falls back to the scoring
+// rows when the entry list doesn't know the division; 0 when neither does
+// (callers then omit the "of N").
 function divisionField(divisionName) {
   const rows = scoringByDiv[divisionName] || [];
   let outs = 0;
-  for (const s of rows) if (mapGet(OUT_WORDS, String(s.FinalPlace || "").trim())) outs++;
+  for (const s of rows) if (mapGet(OUT_WORDS, String(s.FinalPlace || "").trim()) === "withdrawn") outs++;
   const entries = (lastFeed && Array.isArray(lastFeed.EntryList)) ? lastFeed.EntryList : [];
   let n = 0;
   for (const e of entries) if (e && e.Status === "Accepted" && e.Division === divisionName) n++;
