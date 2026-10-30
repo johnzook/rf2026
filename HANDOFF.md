@@ -367,12 +367,27 @@ and many others enter through it). Verified live:
   the line before a header (the "Results are not final" banner, a
   zero-score row's horse) and the event-name line (`(Oct. 2026)`) from
   being taken as the header — one wrong header cascades, because every
-  row under it then fails the pinny-in-this-division test. **Known unknown:** the XC and stadium
-  cell layout (`XC Jump`, `Elapsed`, `Time`, `To Date Score/Place`, `Stad
-  Jump`, `Time Pen`, `Final Score/Place`) is inferred from the column
-  names; the parser anchors the XC block on the `m:ss` elapsed cell and
-  takes the last two cells as the final pair, but no XC or SJ rows had
-  posted when it was written. Verify against a paste after XC.
+  row under it then fails the pinny-in-this-division test.
+  **XC block verified (Fri Oct 30):** the first real post-XC row was
+  `65.93 67.04 33.5 7 20.0 07:54 34.4 87.9 1` with two judges — judge
+  marks, dressage score and place, XC jump, elapsed, time penalties, to
+  date score, to date place — exactly the inferred layout; the `m:ss`
+  elapsed-cell anchor holds. **Known unknown that remains:** the stadium
+  block (`Stad Jump`, `Time Pen`, `Final Score/Place`) is still inferred
+  from the column names; the parser takes the last two cells as the final
+  pair. Verify against a paste after SJ.
+  **"To Date Place" ranks finishers of that phase only** — the same row
+  showed `1` because that combo was the first home from XC, while it sat
+  last in the division on cumulative points. scoringLive's `FinalPlace`,
+  by contrast, ranks `FinalPoints` across the whole division live (the
+  Aug 2026 finding above), and "currently Nth overall", the tie marker
+  (equal places) and the round view's placing sort all assume that. So
+  `rankScoreboard` computes the overall itself: ascending `FinalPoints`
+  per division, equal points sharing a number, out codes and unscored
+  rows left alone; the per-phase place fields stay the board's. Before
+  this, the first XC finisher read "currently 1st overall" and "T1st"
+  (tied with a dressage-only 1st via the fall-through) — a real spectator
+  caught it within the hour.
 
 **Design chosen:** the one-copy snapshot (section S of TESTPLAN,
 `tools/snapshot-encrypt.js`): a human copies the order of go once, the

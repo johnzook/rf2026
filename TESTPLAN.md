@@ -138,16 +138,22 @@ top-level functions directly in a browser context) or a functional test
     division's final phase is complete (every still-competing combo has a
     posted score in the division's last phase per `PhaseOrder`; out combos
     ignored) — placings can change while later riders are on course, so a
-    done-riding combo in a live division stays "currently". The first
-    place shown carries the field size — `✓ XC 3rd of 15 · currently 2nd
-    overall` — where `divisionField(division)` = accepted entries in the
+    done-riding combo in a live division stays "currently". The OVERALL
+    place carries the field size — `✓ XC 1st · currently 9th of 15
+    overall` — never the phase place: mid-phase a phase place ranks only
+    the combos that have completed that phase (the first one home from XC
+    is "XC 1st" of one so far), whereas the overall is ranked across the
+    whole division. `divisionField(division)` = accepted entries in the
     division (or the scoring-row count if larger) minus the WITHDRAWN
     only (W/IW): eliminated and retired combos started and sit below the
     finishers, so they stay in the field, the way "5th of 15" is said in
     eventing; a withdrawal never started. Omitted when the size is unknown
-    (0) or the combo is itself out (its historical place stays bare). The ride popover states the same size
-    once in its Results header ("Results · 15 in NR") instead of on every
-    row.
+    (0) or the combo is itself out (its historical place stays bare). The
+    ride popover states the same size once in its Results header
+    ("Results · 15 in NR") instead of on every row. Upcoming rows (not
+    past, not out, not extras) append the same standing to their countdown
+    — `in 41 min · currently 6th of 9 overall` today, `currently 6th of 9
+    overall` alone on another day — and stay bare with no result.
 32. No places posted and not out: `✓ scores pending · <next|event
     complete>`; `event complete` also appended when finished but overall
     place missing.
@@ -748,13 +754,17 @@ from their site by the page or by a script. Tests build synthetic boards
     cells after `XC Time`, whether or not a leading `XC Jump` cell was
     posted — or, with no elapsed cell but ≥ J+7 cells, positional; the
     stadium block is whatever follows and its last two cells are
-    `SJScore`/`SJPlace`. `FinalPoints`/`FinalPlace` fall through SJ → XC →
-    dressage. An out code (`E`, `R`, `W`, `RF`, …) anywhere becomes
-    `FinalPlace` and the place of the phase it sits in (after the XC
-    block → SJ, after dressage → XC, else dressage); cells after it are
-    ignored. Missing values are `"--"` (parse to NaN like scoringLive).
-    Known unknown: the XC/SJ cell layout is inferred from the column names
-    and unverified until those phases post.
+    `SJScore`/`SJPlace`. `FinalPoints` falls through SJ → XC → dressage
+    (the cumulative total through the combo's completed phases). The
+    per-row `FinalPlace` fall-through is only provisional: `parseScoreboard`
+    then ranks it across the division (item 116). An out code (`E`, `R`,
+    `W`, `RF`, …) anywhere becomes `FinalPlace` and the place of the phase
+    it sits in (after the XC block → SJ, after dressage → XC, else
+    dressage); cells after it are ignored. Missing values are `"--"`
+    (parse to NaN like scoringLive). The XC block layout was verified
+    against the real post-XC row on Friday (`65.93 67.04 33.5 7 20.0 07:54
+    34.4 87.9 1` with 2 judges → XCScore 87.9, XCPlace 1); the stadium
+    block is still inferred from the column names until SJ posts.
 104. `phaseOrderFromFeed(feed)`: per division, phases ordered by their
     earliest ride time (`d`/`xc`/`sj`), with phases not yet in the order
     of go appended in the usual order (SJ posts after XC: "d-xc" →
@@ -876,3 +886,18 @@ network.
 115. The tool exports `{ parseArgs, fromLine, spacingGuard,
     MIN_SPACING_MS }` and runs its CLI only under `require.main ===
     module`, so requiring it from the suite has no side effects.
+
+116. `rankScoreboard(rows)` (called by `parseScoreboard`): the board's "To
+    Date Place" after a phase ranks only the combos that have COMPLETED
+    that phase — verified Friday: the first one home from XC showed `1`
+    of one — so it must not become the overall. Like scoringLive's
+    `FinalPlace`, the overall is ranked here across the whole division by
+    ascending `FinalPoints` (a combo still on its dressage score ranks
+    among those who have run), equal points sharing a number with the
+    next place skipped (1, 2, 2, 4 — no XC-time tiebreak is available),
+    out codes kept as-is, unscored combos `"--"`, per division only. The
+    per-phase place fields stay the board's. End to end: the first combo
+    home from XC reads `currently 3rd of 3 overall` (never "1st", never
+    "T1st" against a dressage-only 1st), its popover keeps the phase cell
+    `(1st)` and shows `Overall … (3rd)`, and the round sheet's placing
+    sort agrees.
