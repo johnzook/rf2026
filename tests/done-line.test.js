@@ -1,8 +1,8 @@
 'use strict';
-// TESTPLAN group H (done-line on completed rides). Field sizes: DD has 8
-// accepted entries minus 1 withdrawn = 7 (the eliminated one started and
-// counts); EE has 1 entry but 3 scoring rows, retired included = 3 (see
-// item 31's "of N" rule).
+// TESTPLAN group H (done-line on completed rides, standing on upcoming
+// ones). Field sizes: DD has 9 accepted entries minus 2 withdrawn = 7 (the
+// eliminated one started and counts); EE has 1 entry but 3 scoring rows,
+// retired included = 3. "of N" rides on the overall place only (item 31).
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -48,6 +48,9 @@ function doneFeed() {
     // H31c: SJ done, division EE fully complete -> finished.
     F.entry({ pinny: 668, rider: F.FOLLOWED.zook, division: 'EE',
       details: [rd('Show Jumping', 'SJR1', 7, 18, 9, 30)] }),
+    // H31d: withdrawn, with an upcoming XC today 17:00 -> bare "withdrawn".
+    F.entry({ pinny: 671, rider: F.FOLLOWED.goodman, division: 'DD',
+      details: [rd('Cross Country', 'XC', 7, 18, 17, 0)] }),
   ]);
 }
 
@@ -67,6 +70,7 @@ function doneScoring() {
       F.scoringRow({ pinny: 665, divisionId: 30, finalPlace: 'E' }),
       F.scoringRow({ pinny: 666, divisionId: 30, dressageScore: '35.2', dressagePlace: '14', finalPlace: 'W' }),
       F.scoringRow({ pinny: 667, divisionId: 30, dressagePlace: '5', xcPlace: '4', finalPlace: '4' }),
+      F.scoringRow({ pinny: 671, divisionId: 30, dressagePlace: '9', finalPlace: 'W' }),
     ],
   });
 }
@@ -75,16 +79,39 @@ test('H31: done rides show ✓ phase place + currently/finished overall + next r
   const s = await openPage({ server, feed: doneFeed(), scoring: doneScoring(), now: NOON });
   try {
     const stillRiding = await rowInfo(s.page, 660);
-    assert.equal(stillRiding.countdown, '✓ XC T3rd of 7 · currently 2nd overall · next: SJ 3:00 PM',
+    assert.equal(stillRiding.countdown, '✓ XC T3rd · currently 2nd of 7 overall · next: SJ 3:00 PM',
       'shared phase place gets a T prefix');
     // 661 is done riding but a competitor in DD still jumps at 3:00 PM, so
     // the division isn't final — "currently", never "finished", until the
     // last rider of the division's final phase has a posted score.
     const doneButDivisionLive = await rowInfo(s.page, 661);
-    assert.equal(doneButDivisionLive.countdown, '✓ SJ 1st of 7 · currently 1st overall');
+    assert.equal(doneButDivisionLive.countdown, '✓ SJ 1st · currently 1st of 7 overall');
     // 668's division EE has all active final-phase scores posted -> finished.
     const finished = await rowInfo(s.page, 668);
-    assert.equal(finished.countdown, '✓ SJ 2nd of 3 · finished 2nd overall');
+    assert.equal(finished.countdown, '✓ SJ 2nd · finished 2nd of 3 overall');
+  } finally { await s.context.close(); }
+});
+
+test('H31: upcoming rows carry the combo\'s current standing — with the countdown today, alone on another day, never without a result or for an out combo', async () => {
+  const s = await openPage({ server, feed: doneFeed(), scoring: doneScoring(), now: NOON });
+  try {
+    const rowsFor = pinny => s.page.evaluate(pinny => {
+      const rows = [...document.querySelectorAll('#list .row')];
+      return rows.filter(r => { const b = r.querySelector('.horse b'); return b && b.textContent === '#' + pinny; })
+        .map(r => (r.querySelector('.countdown') || { textContent: '' }).textContent);
+    }, pinny);
+    // 660: XC done at 8:00 (first row), SJ at 15:00 today (second row).
+    assert.deepEqual(await rowsFor(660), [
+      '✓ XC T3rd · currently 2nd of 7 overall · next: SJ 3:00 PM',
+      'in 3 h 0 min · currently 2nd of 7 overall',
+    ]);
+    // 662: XC at 16:00 today but no scoring row at all -> countdown only.
+    assert.deepEqual((await rowsFor(662))[1], 'in 4 h 0 min');
+    // 671: withdrawn, XC at 17:00 -> the out word, no standing.
+    assert.deepEqual(await rowsFor(671), ['withdrawn']);
+    // 667: SJ tomorrow -> on that day's chip the standing stands alone.
+    await s.page.evaluate(() => { selectedDay = '2026-07-19'; render(); });
+    assert.deepEqual(await rowsFor(667), ['currently 4th of 7 overall']);
   } finally { await s.context.close(); }
 });
 
@@ -93,7 +120,7 @@ test('H32: scores pending / event complete wording', async () => {
   try {
     assert.equal((await rowInfo(s.page, 662)).countdown, '✓ scores pending · next: XC 4:00 PM');
     assert.equal((await rowInfo(s.page, 663)).countdown, '✓ scores pending · event complete');
-    assert.equal((await rowInfo(s.page, 664)).countdown, '✓ XC T3rd of 7 · event complete',
+    assert.equal((await rowInfo(s.page, 664)).countdown, '✓ XC T3rd · event complete',
       'phase place without overall still gets event complete');
   } finally { await s.context.close(); }
 });
@@ -112,7 +139,7 @@ test('H34: next: points at the combo\'s next ride from NOW at its effective (ove
     // Dressage row (8:00) must skip the already-run XC (10:00) and point at
     // tomorrow's SJ, with a weekday label.
     const dressage = await rowInfo(s.page, 667);
-    assert.equal(dressage.countdown, '✓ Dressage 5th of 7 · currently 4th overall · next: SJ Sun 3:00 PM');
+    assert.equal(dressage.countdown, '✓ Dressage 5th · currently 4th of 7 overall · next: SJ Sun 3:00 PM');
     // XC row says the same next.
     const xcRows = await s.page.evaluate(() => {
       const rows = [...document.querySelectorAll('#list .row')];

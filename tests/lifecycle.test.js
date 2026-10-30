@@ -69,7 +69,8 @@ test('F23b: a posted phase score ends "underway" immediately; never a future rid
       resultsIdx['642|Test Division'] = { DressageScore: '30.0', DressagePlace: '1', FinalPlace: '1' };
       render();
     });
-    assert.equal((await rowInfo(s.page, 642)).countdown, 'in 20 min');
+    // (An upcoming ride with a result carries its standing — item 31.)
+    assert.equal((await rowInfo(s.page, 642)).countdown, 'in 20 min · currently 1st of 6 overall');
 
     // An out code in the score field is not a posted result.
     await s.page.evaluate(() => {

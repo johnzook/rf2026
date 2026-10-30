@@ -280,6 +280,73 @@ test('S103: judge-count-aware dressage mapping, XC block via the Elapsed anchor,
   } finally { await s.context.close(); }
 });
 
+// ---- S116: rankScoreboard — the overall is ranked across the division ----
+
+test('S116: FinalPlace is ranked per division on cumulative points, not copied from the board\'s among-finishers "To Date Place"', async () => {
+  await publishSchedule(); await publishScores();
+  const s = await openSnap();
+  try {
+    // A 2-judge FEI board after the first XC finisher (the real Galway
+    // shape): #1 home on 87.9 with "To Date Place" 1 (of one), the rest
+    // still on dressage; two of them on equal points; one eliminated; one
+    // unscored; a second division with a single row.
+    const text = [
+      'CCI Three Star - Short (CCI3-S)Snapshot Test Event(Oct. 2026)', 'Jdg @ C: A, Jdg @ E: B', ...COLS_2,
+      '1\t', 'Ada Tester (USA)', 'Horse One', '65.93', '67.04', '33.5', '7', '20.0', '07:54', '34.4', '87.9', '1',
+      '2\t', 'Bea Sample (USA)', 'Horse Two', '73.89', '72.41', '26.8', '1',
+      '3\t', 'Cal Fixture (USA)', 'Horse Three', '70.93', '72.41', '28.3', '2',
+      '4\t', 'Dee Mock (USA)', 'Horse Four', '70.00', '72.00', '28.3', '2',
+      '5\t', 'Eve Code (USA)', 'Horse Five', '66.00', '66.00', '35.0', '5', 'E',
+      '6\t', 'Fay Blank (USA)', 'Horse Six',
+      'Open Novice (ON)Snapshot Test Event(Oct. 2026)', 'Judge: Someone', ...COLS_0,
+      '101\t', 'Ada Tester (USA)', 'Horse One', '18.8', '1',
+    ].join('\n');
+    const r = await parseBoard(s.page, text, false); // shape heuristic: no feed knows CCI3-S
+    const by = Object.fromEntries(r.rows.map(x => [x.pinny, x]));
+    // Overall: 26.8 → 1, the two 28.3s share 2 and the next place skips to 4,
+    // the XC finisher on 87.9 is last of the scored; E kept; unscored "--".
+    assert.deepEqual([1, 2, 3, 4, 5, 6].map(p => by[p].fin[1]), ['4', '1', '2', '2', 'E', '--']);
+    assert.deepEqual([1, 2, 3, 4, 5, 6].map(p => by[p].fin[0]), ['87.9', '26.8', '28.3', '28.3', '35.0', '--']);
+    // Per-phase places stay the board's (among finishers of that phase).
+    assert.deepEqual(by[1].xc, ['87.9', '1']);
+    assert.deepEqual(by[1].d, ['33.5', '7']);
+    assert.deepEqual(by[5].xc, ['--', 'E']);
+    // A single-row division ranks 1st.
+    assert.deepEqual(by[101].fin, ['18.8', '1']);
+    // Ranking is per division: ON's 18.8 never competes with CCI3-S.
+    assert.equal(by[2].fin[1], '1');
+  } finally { await s.context.close(); }
+});
+
+test('S116: end to end — the first combo home from XC reads "currently last overall", no tie marker, and the round sheet\'s placing sort agrees', async () => {
+  const text = [
+    'Open Novice (ON)Snapshot Test Event(Oct. 2026)', 'Judge: Someone', ...COLS_0,
+    '101\t', 'Ada Tester (USA)', 'Horse One', '18.8', '1', '20.0', '04:10', '0', '38.8', '1',
+    '102\t', 'Bea Sample (USA)', 'Horse Two', '22.5', '2',
+    '103\t', 'Eve Code', 'PJ', '30.0', '3',
+  ].join('\n');
+  await publishSchedule(); await publishScores({ text });
+  const s = await openSnap({ riders: ['Ada Tester', 'Bea Sample'] });
+  try {
+    // Ada's XC row (Sat 10:00) is in the future under the pinned clock, so
+    // the row carries her standing: 3rd of 3, not "1st" and not "T1st".
+    await s.page.evaluate(() => { selectedDay = '2026-10-31'; render(); });
+    const ada = await rowInfo(s.page, 101);
+    assert.equal(ada.countdown, 'currently 3rd of 3 overall');
+    assert.match(ada.pop, /Cross Country38\.8 \(1st\)/, 'phase place stays the board\'s among-finishers place');
+    assert.match(ada.pop, /Overall38\.8 \(3rd\)/);
+    const bea = await rowInfo(s.page, 102);
+    assert.equal(bea.countdown, 'currently 1st of 3 overall');
+    assert.match(bea.pop, /Overall22\.5 \(1st\)/);
+    // Placing sort of the XC round: Bea (22.5, carried) ahead of Ada (38.8, posted).
+    await s.page.evaluate(() => { openRoundSheet('ON', 'Cross Country'); roundSort = 'place'; renderRoundSheet(); });
+    const rows = await s.page.$$eval('#round-list .qrow', els => els.map(e => e.innerText.replace(/\s+/g, ' ').trim()));
+    assert.match(rows[0], /^1st .*Bea Sample/);
+    assert.match(rows[2], /^3rd .*Ada Tester/);
+    assert.ok(!rows.some(t => /T1st/.test(t)), rows.join(' | '));
+  } finally { await s.context.close(); }
+});
+
 // ---- S104: phaseOrderFromFeed ----
 
 test('S104: phase order per division from the feed — unscheduled phases appended in the usual order, a d-sj-xc feed preserved, unknown divisions default', async () => {

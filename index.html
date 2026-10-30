@@ -908,16 +908,17 @@ function donePlaces(ride, isFinal) {
   const op = parseInt(res.FinalPlace, 10);
   const ppT = pp && tiedAt(ride.division, pf, pp) ? "T" : "";
   const opT = op && tiedAt(ride.division, "FinalPlace", op) ? "T" : "";
-  // "of N" rides on the first place shown, so the line reads
-  // "Dressage 5th of 15 · currently 5th overall" rather than saying it twice.
-  // A combo that is itself out (E/R/W…) keeps its historical place bare:
-  // "14th of 6" after the field shrank would read as nonsense.
+  // "of N" belongs to the overall place: that one is ranked across the
+  // whole division, whereas a phase place mid-phase ranks only the combos
+  // that have completed it (the first one home from XC is "XC 1st" — of
+  // one so far). A combo that is itself out (E/R/W…) keeps its historical
+  // place bare: "14th of 6" after the field shrank would read as nonsense.
   const selfOut = mapGet(OUT_WORDS, String(res.FinalPlace || "").trim());
-  const n = (pp || op) && !selfOut ? divisionField(ride.division) : 0;
+  const n = op && !selfOut ? divisionField(ride.division) : 0;
   const of = n ? ` of ${n}` : "";
   return {
-    phase: pp ? `${mapGet(PHASE_SHORT, ride.phase) || ride.phase} ${ppT}${pp}${ordinal(pp)}${of}` : null,
-    overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)}${pp ? "" : of} overall` : null,
+    phase: pp ? `${mapGet(PHASE_SHORT, ride.phase) || ride.phase} ${ppT}${pp}${ordinal(pp)}` : null,
+    overall: op ? `${isFinal ? "finished" : "currently"} ${opT}${op}${ordinal(op)}${of} overall` : null,
   };
 }
 
@@ -1182,6 +1183,13 @@ function render() {
       countdown = minsUntil <= 0 ? "underway"
         : minsUntil < 60 ? `in ${minsUntil} min`
         : `in ${Math.floor(minsUntil / 60)} h ${minsUntil % 60} min`;
+    }
+    // An upcoming ride carries the combo's current standing too, so the
+    // row answers "where do they sit going in" without opening the popover:
+    // "in 2 h 10 min · currently 7th of 9 overall".
+    if (!past && !out && !r.extra) {
+      const standing = donePlaces(r, false).overall;
+      if (standing) countdown = [countdown, standing].filter(Boolean).join(" · ");
     }
     if (r.extra) {
       return `
@@ -2103,7 +2111,35 @@ function parseScoreboard(text, feed) {
       scoreboardCells(cells, judges)));
     stats.rows++;
   }
+  rankScoreboard(scoring);
   return { DivisionsList: [...divisions.values()], ScoringList: scoring, stats };
+}
+
+// The board's "To Date Place" after a phase ranks only the combos that
+// have COMPLETED that phase, so the first one home from cross country
+// reads "1st" of one. scoringLive's FinalPlace instead ranks cumulative
+// points across the whole division live (a combo still carrying only its
+// dressage score ranks among those who have run), which is what
+// "currently Nth overall", the tie marker and the round view's placing
+// sort all assume. So FinalPlace is computed here the same way: ascending
+// FinalPoints within the division, equal points sharing a number (1, 1,
+// 3 — no XC-time tiebreak is available), out codes kept as-is, unscored
+// combos left "--". The per-phase place fields stay the board's (among
+// finishers so far), as in scoringLive.
+function rankScoreboard(rows) {
+  const byDiv = Object.create(null);
+  for (const r of rows) (byDiv[r.DivisionId] = byDiv[r.DivisionId] || []).push(r);
+  for (const div in byDiv) {
+    const live = byDiv[div].filter(r => !SB_CODE_RE.test(String(r.FinalPlace || "")) && !isNaN(parseFloat(r.FinalPoints)));
+    live.sort((a, b) => parseFloat(a.FinalPoints) - parseFloat(b.FinalPoints));
+    let place = 0, prev = null;
+    live.forEach((r, i) => {
+      const pts = parseFloat(r.FinalPoints);
+      if (pts !== prev) { place = i + 1; prev = pts; }
+      r.FinalPlace = String(place);
+    });
+    for (const r of byDiv[div]) if (!live.includes(r) && !SB_CODE_RE.test(String(r.FinalPlace || ""))) r.FinalPlace = "--";
+  }
 }
 
 // Assign a row's posted cells to the scoringLive fields. Cells arrive in
